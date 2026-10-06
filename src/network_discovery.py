@@ -1,3 +1,4 @@
+import os
 import subprocess
 import re
 import socket
@@ -223,15 +224,31 @@ def scan_subnet_concurrently(subnet_str, max_threads=64):
         pass
     return active_ips
 
+def get_nmap_path():
+    # 1. Check system PATH
+    path = shutil.which("nmap")
+    if path:
+        return path
+    # 2. Check portable local paths
+    local_paths = [
+        os.path.abspath("tools/nmap/nmap.exe"),
+        os.path.abspath("nmap.exe"),
+        "C:\\Program Files\\Nmap\\nmap.exe",
+        "C:\\Program Files (x86)\\Nmap\\nmap.exe"
+    ]
+    for p in local_paths:
+        if os.path.exists(p):
+            return p
+    return None
+
 def run_nmap_scan(subnet_str):
-    """ Ejecuta nmap si está disponible en el sistema para descubrimiento avanzado de la subred. """
-    nmap_path = shutil.which("nmap")
+    """ Ejecuta nmap (sistema o portable) para descubrimiento avanzado de la subred. """
+    nmap_path = get_nmap_path()
     if not nmap_path:
         return []
     
     discovered = []
     try:
-        # nmap -sn (Ping scan) o -T4 -F (Fast scan)
         cmd = [nmap_path, "-sn", subnet_str]
         output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=15).decode('utf-8', errors='ignore')
         
@@ -293,7 +310,8 @@ def full_network_discovery():
 
     # Intentar escaneo con Nmap si está disponible, o barrido concurrente multipasos
     nmap_devices = []
-    has_nmap = shutil.which("nmap") is not None
+    nmap_bin = get_nmap_path()
+    has_nmap = nmap_bin is not None
     
     device_map = {d["ip"]: d for d in arp_devices}
 
