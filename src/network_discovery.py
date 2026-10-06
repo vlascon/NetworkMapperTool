@@ -4,6 +4,8 @@ import socket
 import requests
 import psutil
 import ipaddress
+import concurrent.futures
+import shutil
 
 OUI_DATABASE = {
     "00:11:32": "Synology",
@@ -90,7 +92,7 @@ OUI_DATABASE = {
 }
 
 def lookup_mac_vendor(mac):
-    if not mac:
+    if not mac or mac == "unknown":
         return "Desconocido"
     clean_mac = mac.lower().replace("-", ":")
     prefix = ":".join(clean_mac.split(":")[:3])
@@ -147,19 +149,6 @@ def get_gateways_and_routes():
                     })
     except Exception:
         pass
-
-    try:
-        net_stat = subprocess.check_output("netstat -rn", shell=True, stderr=subprocess.DEVNULL, timeout=2).decode('utf-8', errors='ignore')
-        for line in net_stat.split('\n'):
-            if "0.0.0.0" in line:
-                parts = line.strip().split()
-                if len(parts) >= 3:
-                    gw = parts[2]
-                    if gw != "0.0.0.0" and gw not in [g["gateway"] for g in gateways]:
-                        gateways.append({"gateway": gw, "interface": "Default"})
-    except Exception:
-        pass
-
     return {"gateways": gateways, "routes": routes}
 
 def get_arp_table():
@@ -187,11 +176,88 @@ def get_arp_table():
                         "mac": mac.lower().replace("-", ":"),
                         "type": mtype,
                         "interface_ip": current_interface,
-                        "vendor": lookup_mac_vendor(mac)
+                        "vendor": lookup_mac_vendor(mac),
+                        "status": "Online (ARP)"
                     })
     except Exception:
         pass
     return arp_devices
+
+def ping_sweep_ip(ip_str):
+    """Realiza un ping rápido por socket o ping ICMP para descubrir hosts activos."""
+    try:
+        # Prueba rápida de conexión TCP en puertos comunes o socket connect
+        socket.setdefaulttimeout(0.3)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = s.connect_ex((ip_str, 80))
+        s.close()
+        if result == 0:
+            return ip_str
+        
+        # Fallback a puerto 443 o 135
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result2 = s.connect_ex((ip_str, 443))
+        s.close()
+        if result2 == 0:
+            return ip_str
+    except Exception:
+        pass
+    return None
+
+def scan_subnet_concurrently(subnet_str, max_threads=64):
+    """ Barre una subred completa en paralelo utilizando hilos para alta velocidad. """
+    active_ips = []
+    try:
+        net = ipaddress.ip_network(subnet_str, strict=False)
+        # Limitar a subredes razonables para evitar barridos masivos de /8 públicos
+        if net.num_addresses > 4096:
+            return active_ips
+        
+        hosts = [str(ip) for ip in net.hosts()]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
+            results = executor.map(ping_sweep_ip, hosts)
+            for ip in results:
+                if ip:
+                    active_ips.append(ip)
+    except Exception:
+        pass
+    return active_ips
+
+def run_nmap_scan(subnet_str):
+    """ Ejecuta nmap si está disponible en el sistema para descubrimiento avanzado de la subred. """
+    nmap_path = shutil.which("nmap")
+    if not nmap_path:
+        return []
+    
+    discovered = []
+    try:
+        # nmap -sn (Ping scan) o -T4 -F (Fast scan)
+        cmd = [nmap_path, "-sn", subnet_str]
+        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=15).decode('utf-8', errors='ignore')
+        
+        current_ip = None
+        for line in output.split('\n'):
+            if "Nmap scan report for" in line:
+                match = re.search(r"(\d{1,3}(?:\.\d{1,3}){3})", line)
+                if match:
+                    current_ip = match.group(1)
+            elif "MAC Address:" in line and current_ip:
+                mac_match = re.search(r"([0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2}[:-][0-9A-Fa-f]{2})", line)
+                vendor_match = re.search(r"\((.*?)\)", line)
+                mac = mac_match.group(1) if mac_match else "unknown"
+                vendor = vendor_match.group(1) if vendor_match else lookup_mac_vendor(mac)
+                discovered.append({
+                    "ip": current_ip,
+                    "mac": mac.lower().replace("-", ":"),
+                    "type": "dynamic",
+                    "interface_ip": "Nmap Scan",
+                    "vendor": vendor,
+                    "status": "Online (Nmap)"
+                })
+                current_ip = None
+    except Exception:
+        pass
+    return discovered
 
 def full_network_discovery():
     wifi_info = get_wifi_ssid()
@@ -199,6 +265,7 @@ def full_network_discovery():
     routes_data = get_gateways_and_routes()
     arp_devices = get_arp_table()
 
+    # Recopilar todas las subredes alcanzables (multi-segmento)
     subnets_to_scan = set()
     for interface in psutil.net_if_addrs().values():
         for addr in interface:
@@ -218,9 +285,52 @@ def full_network_discovery():
         if dest != "0.0.0.0" and mask != "255.255.255.255" and dest != "127.0.0.1":
             try:
                 net = ipaddress.ip_network(f"{dest}/{mask}", strict=False)
-                subnets_to_scan.add(str(net))
+                # Solo subredes locales / privadas o menores a /16
+                if net.is_private or net.prefixlen >= 16:
+                    subnets_to_scan.add(str(net))
             except Exception:
                 pass
+
+    # Intentar escaneo con Nmap si está disponible, o barrido concurrente multipasos
+    nmap_devices = []
+    has_nmap = shutil.which("nmap") is not None
+    
+    device_map = {d["ip"]: d for d in arp_devices}
+
+    for subnet in subnets_to_scan:
+        if has_nmap:
+            nmap_results = run_nmap_scan(subnet)
+            for nd in nmap_results:
+                if nd["ip"] not in device_map:
+                    device_map[nd["ip"]] = nd
+        
+        # Barrido concurrente complementario en subredes locales
+        active_ips = scan_subnet_concurrently(subnet)
+        for ip in active_ips:
+            if ip not in device_map:
+                device_map[ip] = {
+                    "ip": ip,
+                    "mac": "unknown",
+                    "type": "dynamic",
+                    "interface_ip": subnet,
+                    "vendor": "Desconocido",
+                    "status": "Online (Active Sweep)"
+                }
+
+    # Asegurar que gateways estén incluidos
+    for gw in routes_data["gateways"]:
+        gw_ip = gw["gateway"]
+        if gw_ip and gw_ip != "0.0.0.0" and gw_ip not in device_map:
+            device_map[gw_ip] = {
+                "ip": gw_ip,
+                "mac": "unknown",
+                "type": "gateway",
+                "interface_ip": gw["interface"],
+                "vendor": "Router / Gateway",
+                "status": "Online (Gateway)"
+            }
+
+    all_devices = list(device_map.values())
 
     return {
         "public_ip": public_ip,
@@ -228,7 +338,8 @@ def full_network_discovery():
         "gateways": routes_data["gateways"],
         "routes": routes_data["routes"],
         "subnets_scanned": list(subnets_to_scan),
-        "devices": arp_devices
+        "nmap_available": has_nmap,
+        "devices": all_devices
     }
 
 if __name__ == "__main__":
