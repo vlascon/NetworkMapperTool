@@ -554,7 +554,7 @@ def test_listar_declara_archivos_corruptos(tmp_path):
         fh.write("{no es json")
     levs, rechazados = lv.listar_levantamientos(str(tmp_path), lev["empresa"], incluir_rechazados=True)
     assert len(levs) == 1
-    assert rechazados == ["lev-roto.json"]
+    assert rechazados == [("lev-roto.json", "no es JSON válido")]
     # compatibilidad: sin el flag devuelve solo la lista
     assert len(lv.listar_levantamientos(str(tmp_path), lev["empresa"])) == 1
 
@@ -618,7 +618,8 @@ def test_consolidado_honesto_verificado_vs_inferido(tmp_path):
     assert "no verificado" in html                 # PC-BODEGA desconocido
     assert "agrupacion inferida" in html.lower()
     assert "no demuestra" in html                  # límite declarado
-    assert "en claro" in html                      # cifrado pendiente declarado
+    assert "cifrados con contraseña" in html       # cifrado en reposo declarado
+    assert "EN CLARO" in html or "en claro" in html  # el informe mismo queda en claro y se advierte
 
 
 def test_consolidado_sin_cdn_y_escapa_html(tmp_path):
@@ -657,3 +658,97 @@ def test_consolidado_tiene_estilos_movil_e_impresion(tmp_path):
     assert "@media (max-width:640px)" in html
     assert "@media print" in html
     assert "overflow-x:auto" in html
+
+
+# ------------------------------------------------------- cifrado portable
+
+from src import cifrado as cif
+
+
+def test_cifrado_roundtrip():
+    datos = '{"empresa": "Acme", "hostname": "PC-SECRETO"}'.encode()
+    contenedor = cif.cifrar_bytes(datos, "clave-de-prueba")
+    assert cif.esta_cifrado(contenedor)
+    assert cif.descifrar_bytes(contenedor, "clave-de-prueba") == datos
+
+
+def test_cifrado_no_deja_texto_en_claro():
+    import json as _json
+    datos = _json.dumps({"empresa": "EmpresaSecreta", "hostname": "PC-SECRETO-99"}).encode()
+    contenedor = cif.cifrar_bytes(datos, "clave")
+    assert b"EmpresaSecreta" not in contenedor
+    assert b"PC-SECRETO-99" not in contenedor
+
+
+def test_cifrado_contrasena_incorrecta_rechazada():
+    contenedor = cif.cifrar_bytes(b"datos", "correcta")
+    with pytest.raises(cif.ErrorCifrado):
+        cif.descifrar_bytes(contenedor, "incorrecta")
+
+
+def test_cifrado_detecta_alteracion():
+    contenedor = bytearray(cif.cifrar_bytes(b"datos importantes", "clave"))
+    contenedor[-5] ^= 0xFF
+    with pytest.raises(cif.ErrorCifrado):
+        cif.descifrar_bytes(bytes(contenedor), "clave")
+
+
+def test_cifrado_rechaza_contenedor_truncado():
+    contenedor = cif.cifrar_bytes(b"x", "clave")
+    with pytest.raises(cif.ErrorCifrado):
+        cif.descifrar_bytes(contenedor[:20], "clave")
+
+
+def test_cifrado_sin_estado_previo_portable():
+    # Mismo contenedor, proceso distinto: basta la contraseña (no hay estado en el PC).
+    contenedor = cif.cifrar_bytes(b"portable", "misma-clave")
+    assert cif.descifrar_bytes(contenedor, "misma-clave") == b"portable"
+
+
+def test_guardar_cifrado_y_listar_con_contrasena(tmp_path):
+    lev = _lev_prueba()
+    lv.merge_equipo(lev, _equipo_prueba(), lambda c: None)
+    destino = lv.guardar_levantamiento(lev, str(tmp_path), contrasena="pendrive123")
+    with open(destino, "rb") as fh:
+        crudo = fh.read()
+    assert cif.esta_cifrado(crudo)
+    assert b"Empresa Prueba" not in crudo and b"PC-1" not in crudo
+    # sin contraseña: declarado como rechazado, no omitido
+    levs, rech = lv.listar_levantamientos(str(tmp_path), lev["empresa"],
+                                          incluir_rechazados=True)
+    assert levs == [] and len(rech) == 1 and "contraseña" in rech[0][1]
+    # con contraseña correcta: se lista normal
+    levs, rech = lv.listar_levantamientos(str(tmp_path), lev["empresa"],
+                                          incluir_rechazados=True, contrasena="pendrive123")
+    assert len(levs) == 1 and rech == []
+    assert levs[0]["equipos"][0]["hostname"] == "PC-1"
+    # con contraseña incorrecta: declarado con motivo
+    levs, rech = lv.listar_levantamientos(str(tmp_path), lev["empresa"],
+                                          incluir_rechazados=True, contrasena="mala")
+    assert levs == [] and "incorrecta" in rech[0][1]
+
+
+def test_guardar_cifrado_bak_tambien_cifrado(tmp_path):
+    lev = _lev_prueba()
+    destino = lv.guardar_levantamiento(lev, str(tmp_path), contrasena="k")
+    lv.merge_equipo(lev, _equipo_prueba(), lambda c: None)
+    lv.guardar_levantamiento(lev, str(tmp_path), contrasena="k")
+    with open(destino + ".bak", "rb") as fh:
+        assert cif.esta_cifrado(fh.read())
+
+
+def test_import_valida_archivo_cifrado():
+    lev = _lev_prueba()
+    destino = lv.guardar_levantamiento(lev, "datos-test-import", contrasena="pw")
+    import shutil as _sh
+    try:
+        with open(destino, "rb") as fh:
+            data = fh.read()
+        ok, errores = lv.validar_levantamiento_bytes(data)
+        assert ok is None and "contraseña" in errores[0]
+        ok, errores = lv.validar_levantamiento_bytes(data, contrasena="pw")
+        assert ok is not None and errores == []
+        ok, errores = lv.validar_levantamiento_bytes(data, contrasena="otra")
+        assert ok is None and errores
+    finally:
+        _sh.rmtree("datos-test-import", ignore_errors=True)

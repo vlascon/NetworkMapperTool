@@ -50,15 +50,40 @@ def _elegir_modo():
     return "escanear" if op == "1" else "levantamiento"
 
 
+def _pedir_contrasena_existente():
+    import getpass
+    return getpass.getpass("Contraseña de los levantamientos de esta empresa: ")
+
+
+def _crear_contrasena():
+    """Crea la contraseña de un levantamiento nuevo: pedida dos veces,
+    nunca vacía, nunca guardada en disco. Si se olvida no hay recuperación."""
+    import getpass
+    while True:
+        primera = getpass.getpass("Crea una contraseña para proteger el levantamiento: ")
+        if not primera:
+            console.print("[red]La contraseña no puede estar vacía.[/red]")
+            continue
+        segunda = getpass.getpass("Repítela para confirmar: ")
+        if primera != segunda:
+            console.print("[red]No coinciden; intenta de nuevo.[/red]")
+            continue
+        console.print("[dim]Guárdala bien: no se almacena en ninguna parte y si la olvidas no hay recuperación. "
+                      "La necesitarás para abrir el levantamiento en cualquier PC.[/dim]")
+        return primera
+
+
 def flujo_levantamiento(data_dir):
     """Colecta este PC dentro de un levantamiento de empresa, offline.
 
-    Los datos se guardan en claro en data_dir (típicamente el pendrive):
-    el cifrado es una capa separada pendiente de aprobación del usuario.
+    Los datos se guardan CIFRADOS con contraseña (AES-256-GCM, clave por
+    scrypt) en data_dir (típicamente el pendrive): se pueden abrir y
+    continuar desde cualquier equipo compatible con la misma contraseña.
+    La contraseña se pide en cada sesión y nunca se almacena.
     """
     console.print(Panel.fit(
         "[bold cyan]Levantamiento equipo por equipo[/bold cyan]\n"
-        "[dim]Los datos se guardan localmente; no se usa internet.[/dim]",
+        "[dim]Offline: los datos quedan cifrados con tu contraseña en el pendrive/carpeta.[/dim]",
         border_style="cyan"
     ))
 
@@ -80,14 +105,34 @@ def flujo_levantamiento(data_dir):
         console.print("[red]Se necesita un nombre de empresa.[/red]")
         return None
 
+    # 1b. Contraseña: con archivos cifrados existentes se pide para
+    #    abrirlos; si no hay, se creará una al guardar el primero.
+    from src import cifrado as cif
+    contrasena = None
+    carpeta_empresa = lv.ruta_empresa(data_dir, empresa)
+    hay_cifrados = False
+    if os.path.isdir(carpeta_empresa):
+        for nombre in sorted(os.listdir(carpeta_empresa)):
+            if not nombre.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(carpeta_empresa, nombre), "rb") as fh:
+                    if cif.esta_cifrado(fh.read(8)):
+                        hay_cifrados = True
+                        break
+            except Exception:
+                continue
+    if hay_cifrados:
+        contrasena = _pedir_contrasena_existente()
+
     # 2. Levantamiento abierto, nuevo, o revisión de uno finalizado.
-    #    Los archivos corruptos se DECLARAN: sin esto el operador podría
-    #    creer que el levantamiento está completo.
-    todos, rechazados = lv.listar_levantamientos(data_dir, empresa, incluir_rechazados=True)
+    #    Los archivos corruptos o inabribles se DECLARAN: sin esto el
+    #    operador podría creer que el levantamiento está completo.
+    todos, rechazados = lv.listar_levantamientos(data_dir, empresa, incluir_rechazados=True, contrasena=contrasena)
     if rechazados:
-        console.print("\n[red]Archivos de levantamiento rechazados (corruptos o inválidos):[/red]")
-        for nombre in rechazados:
-            console.print(f"  [red]✗[/red] {nombre}")
+        console.print("\n[red]Archivos de levantamiento no incluidos:[/red]")
+        for nombre, motivo in rechazados:
+            console.print(f"  [red]✗[/red] {nombre} — {motivo}")
         console.print("[yellow]No se incluyeron sus datos; el levantamiento puede estar incompleto.[/yellow]")
     abiertos = [l for l in todos if l.get("estado") == "abierto"]
     finalizados = [l for l in todos if l.get("estado") == "finalizado"]
@@ -107,7 +152,7 @@ def flujo_levantamiento(data_dir):
         eleccion = eleccion.strip().upper()
         if eleccion.startswith("F") and eleccion[1:].isdigit() and 1 <= int(eleccion[1:]) <= len(finalizados):
             lev = finalizados[int(eleccion[1:]) - 1]
-            return _menu_finalizado(lev, data_dir)
+            return _menu_finalizado(lev, data_dir, contrasena)
         if eleccion.isdigit() and 1 <= int(eleccion) <= len(abiertos):
             lev = abiertos[int(eleccion) - 1]
         else:
@@ -137,8 +182,10 @@ def flujo_levantamiento(data_dir):
         return candidatos[int(eleccion) - 1]["equipo"]["equipo_id"]
 
     resultado = lv.merge_equipo(lev, equipo, confirmar)
+    if contrasena is None:
+        contrasena = _crear_contrasena()
     avisos = []
-    destino = lv.guardar_levantamiento(lev, data_dir, avisos)
+    destino = lv.guardar_levantamiento(lev, data_dir, avisos, contrasena=contrasena)
     for aviso in avisos:
         console.print(f"[yellow]⚠ {aviso}[/yellow]")
     verbo = "actualizado en" if resultado == "actualizado" else "agregado a"
@@ -151,7 +198,7 @@ def flujo_levantamiento(data_dir):
     if Confirm.ask("\n¿Finalizar el levantamiento? (puedes reabrirlo después para corregir)", default=False):
         lv.finalizar_levantamiento(lev)
         avisos = []
-        lv.guardar_levantamiento(lev, data_dir, avisos)
+        lv.guardar_levantamiento(lev, data_dir, avisos, contrasena=contrasena)
         for aviso in avisos:
             console.print(f"[yellow]⚠ {aviso}[/yellow]")
         console.print("[green]✓ Levantamiento finalizado.[/green]")
@@ -167,10 +214,12 @@ def _generar_informe_consolidado(lev, data_dir):
     nombre = f"informe-{lev['levantamiento_id']}.html"
     destino = generate_consolidated_report(lev, os.path.join(carpeta, nombre))
     console.print(f"[bold white]📄 Informe consolidado:[/bold white] [underline cyan]{destino}[/underline cyan]")
+    console.print("[yellow]⚠ El informe HTML queda EN CLARO en disco: es la salida sensible del "
+                  "levantamiento. Bórralo cuando ya no lo necesites.[/yellow]")
     return destino
 
 
-def _menu_finalizado(lev, data_dir):
+def _menu_finalizado(lev, data_dir, contrasena=None):
     """Acciones sobre un levantamiento finalizado: informe o corrección.
 
     Reabrir pide confirmación explícita: es el modo corrección controlado,
@@ -189,7 +238,7 @@ def _menu_finalizado(lev, data_dir):
         ):
             lv.reabrir_levantamiento(lev)
             avisos = []
-            destino = lv.guardar_levantamiento(lev, data_dir, avisos)
+            destino = lv.guardar_levantamiento(lev, data_dir, avisos, contrasena=contrasena)
             for aviso in avisos:
                 console.print(f"[yellow]⚠ {aviso}[/yellow]")
             console.print("[green]✓ Levantamiento reabierto.[/green] Vuelve a entrar para recolectar este PC.")

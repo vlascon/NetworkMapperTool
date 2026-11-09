@@ -191,8 +191,9 @@ th,td{white-space:normal;word-break:break-word}
     VLANs o SSID repetidos entre sedes).</li>
     <li>Cada equipo se capturo en su propia fecha; los datos pueden
     corresponder a momentos distintos.</li>
-    <li>Los datos de este levantamiento aun se almacenan en claro (etapa de
-    desarrollo); el cifrado esta pendiente de decision.</li>
+    <li>Los datos del levantamiento se almacenan cifrados con contraseña
+    en el pendrive; en cambio ESTE informe HTML queda en claro en disco:
+    borralo cuando ya no lo necesites.</li>
   </ul>
 </div>
 </div>

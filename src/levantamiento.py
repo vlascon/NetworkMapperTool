@@ -69,12 +69,36 @@ def listar_empresas(data_dir):
                   if os.path.isdir(os.path.join(data_dir, d)))
 
 
-def listar_levantamientos(data_dir, empresa, incluir_rechazados=False):
+def _leer_levantamiento_bytes(data, contrasena=None):
+    """Interpreta bytes de un archivo de levantamiento.
+
+    Devuelve (lev_o_None, motivo_error_o_None). Los archivos cifrados
+    necesitan la contraseña; los de desarrollo en claro se leen directo.
+    """
+    from src.cifrado import esta_cifrado, descifrar_bytes, ErrorCifrado
+    if esta_cifrado(data):
+        if not contrasena:
+            return None, "cifrado: requiere contraseña"
+        try:
+            data = descifrar_bytes(data, contrasena)
+        except ErrorCifrado as exc:
+            return None, str(exc)
+    try:
+        lev = json.loads(data.decode("utf-8"))
+    except Exception:
+        return None, "no es JSON válido"
+    if isinstance(lev, dict) and lev.get("levantamiento_id"):
+        return lev, None
+    return None, "estructura inválida"
+
+
+def listar_levantamientos(data_dir, empresa, incluir_rechazados=False, contrasena=None):
     """Lista levantamientos de una empresa.
 
     Con incluir_rechazados=True devuelve (levs, rechazados): los archivos
-    corruptos se DECLARAN por nombre (sin su contenido) para que el
-    operador no crea que el levantamiento está completo.
+    corruptos o que no se pudieron abrir se DECLARAN por nombre y motivo
+    (sin su contenido) para que el operador no crea que el levantamiento
+    está completo. rechazados es una lista de (nombre, motivo).
     """
     carpeta = ruta_empresa(data_dir, empresa)
     if not os.path.isdir(carpeta):
@@ -85,14 +109,16 @@ def listar_levantamientos(data_dir, empresa, incluir_rechazados=False):
         if not nombre.endswith(".json"):
             continue
         try:
-            with open(os.path.join(carpeta, nombre), encoding="utf-8") as fh:
-                lev = json.load(fh)
-            if isinstance(lev, dict) and lev.get("levantamiento_id"):
-                resultado.append(lev)
-            else:
-                rechazados.append(nombre)
+            with open(os.path.join(carpeta, nombre), "rb") as fh:
+                data = fh.read()
         except Exception:
-            rechazados.append(nombre)
+            rechazados.append((nombre, "no se pudo leer el archivo"))
+            continue
+        lev, motivo = _leer_levantamiento_bytes(data, contrasena)
+        if lev is not None:
+            resultado.append(lev)
+        else:
+            rechazados.append((nombre, motivo))
     if incluir_rechazados:
         return resultado, rechazados
     return resultado
@@ -100,10 +126,14 @@ def listar_levantamientos(data_dir, empresa, incluir_rechazados=False):
 
 # ---------------------------------------------------------------- guardado
 
-def guardar_levantamiento(lev, data_dir, avisos=None):
+def guardar_levantamiento(lev, data_dir, avisos=None, contrasena=None):
     """Escritura atómica: temporal en la misma carpeta + renombrado.
-    Conserva la revisión anterior como .bak (una sola) para no perder
-    datos al sobrescribir. Si el respaldo falla NO se calla: el aviso
+
+    Con contrasena el archivo queda CIFRADO (AES-256-GCM, clave derivada
+    por scrypt): en disco nunca queda JSON en claro, ni siquiera el
+    temporal. Sin contrasena guarda en claro SOLO para fixtures/desarrollo.
+    Conserva la revisión anterior como .bak (una sola, igualmente cifrada
+    si el original lo está). Si el respaldo falla NO se calla: el aviso
     llega a `avisos` (si se entrega una lista) para que el operador
     sepa que está sobrescribiendo sin red de seguridad."""
     lev["actualizado_en"] = ahora_iso()
@@ -111,8 +141,12 @@ def guardar_levantamiento(lev, data_dir, avisos=None):
     os.makedirs(carpeta, exist_ok=True)
     destino = ruta_levantamiento(data_dir, lev)
     temporal = destino + ".tmp"
-    with open(temporal, "w", encoding="utf-8") as fh:
-        json.dump(lev, fh, ensure_ascii=False, indent=2)
+    payload = json.dumps(lev, ensure_ascii=False, indent=2).encode("utf-8")
+    if contrasena:
+        from src.cifrado import cifrar_bytes
+        payload = cifrar_bytes(payload, contrasena)
+    with open(temporal, "wb") as fh:
+        fh.write(payload)
         fh.flush()
         os.fsync(fh.fileno())
     if os.path.exists(destino):
@@ -313,15 +347,24 @@ def recolectar_equipo():
 
 # ---------------------------------------------------------------- importación
 
-def validar_levantamiento_bytes(data):
+def validar_levantamiento_bytes(data, contrasena=None):
     """Validación estricta de un archivo de levantamiento ajeno.
 
     Devuelve (lev_o_None, errores). Todo lo que entre al consolidador pasa
-    por aquí: tamaño, JSON, versión de esquema, campos y tipos.
+    por aquí: tamaño, JSON, versión de esquema, campos y tipos. Si el
+    archivo está cifrado, primero se descifra con la contraseña entregada.
     """
     errores = []
     if len(data) > MAX_IMPORT_BYTES:
         return None, [f"archivo excede {MAX_IMPORT_BYTES} bytes"]
+    from src.cifrado import esta_cifrado, descifrar_bytes, ErrorCifrado
+    if esta_cifrado(data):
+        if not contrasena:
+            return None, ["archivo cifrado: se necesita la contraseña para validarlo"]
+        try:
+            data = descifrar_bytes(data, contrasena)
+        except ErrorCifrado as exc:
+            return None, [str(exc)]
     try:
         lev = json.loads(data.decode("utf-8"))
     except Exception as exc:
