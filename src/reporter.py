@@ -1,6 +1,5 @@
 import datetime
 import html
-import json
 
 
 def esc(value):
@@ -8,6 +7,89 @@ def esc(value):
     if value is None:
         return "N/A"
     return html.escape(str(value))
+
+
+CSS = """
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: #070d1d; color: #e2e8f0; padding: 24px 16px; }
+.wrap { max-width: 1100px; margin: 0 auto; }
+.card { background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 20px; margin-bottom: 20px; }
+h1 { font-size: 24px; color: #fff; }
+h2 { font-size: 17px; color: #fff; margin-bottom: 10px; }
+.sub { color: #94a3b8; font-size: 13px; margin-bottom: 12px; }
+.header-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.badges { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.badge { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid #334155; background: #1e293b; color: #cbd5e1; }
+.badge.ok { color: #34d399; border-color: #065f46; }
+.badge.warn { color: #fbbf24; border-color: #92400e; }
+.btn { background: #2563eb; color: #fff; border: 0; border-radius: 10px; padding: 9px 16px; font-size: 13px; cursor: pointer; }
+.btn:hover { background: #3b82f6; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.metric { background: #0f172a; border: 1px solid #1e293b; border-left: 4px solid #3b82f6; border-radius: 12px; padding: 14px 16px; }
+.metric.green { border-left-color: #10b981; } .metric.amber { border-left-color: #f59e0b; } .metric.purple { border-left-color: #a855f7; }
+.metric .k { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; }
+.metric .v { font-size: 22px; font-weight: 700; color: #fff; margin-top: 4px; word-break: break-word; }
+.metric .v.small { font-size: 15px; }
+ul.obs { margin-left: 18px; } ul.obs li { font-size: 13px; color: #cbd5e1; margin-bottom: 6px; }
+/* Topología inferida: cajas y conectores, sin solapes */
+.topo { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.node { border: 1px solid #334155; border-radius: 12px; padding: 10px 18px; text-align: center; background: #1e293b; }
+.node .t { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; }
+.node .n { font-size: 14px; font-weight: 600; color: #fff; word-break: break-word; }
+.node.wan { border-color: #0ea5e9; } .node.gw { border-color: #a855f7; }
+.connector { width: 2px; height: 22px; background: #334155; }
+.groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; width: 100%; margin-top: 8px; }
+.group { border: 1px solid #1e293b; border-radius: 12px; padding: 12px; background: #0b1226; }
+.group .gt { font-size: 13px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+.chip { display: inline-block; font-size: 12px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 3px 8px; margin: 2px; color: #cbd5e1; word-break: break-word; }
+.chip .ip { color: #7dd3fc; font-family: Consolas, monospace; }
+/* Barras de clasificación (sin JS) */
+.bar-row { display: grid; grid-template-columns: minmax(140px, 220px) 1fr 48px; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+.bar-track { background: #1e293b; border-radius: 6px; height: 14px; overflow: hidden; }
+.bar-fill { background: #3b82f6; height: 100%; border-radius: 6px; }
+.bar-row:nth-child(4n+2) .bar-fill { background: #10b981; }
+.bar-row:nth-child(4n+3) .bar-fill { background: #f59e0b; }
+.bar-row:nth-child(4n+4) .bar-fill { background: #a855f7; }
+.bar-count { text-align: right; color: #cbd5e1; font-family: Consolas, monospace; }
+/* Hardware */
+.spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.spec { background: #0b1226; border: 1px solid #1e293b; border-radius: 12px; padding: 12px 14px; }
+.spec .k { font-size: 11px; color: #94a3b8; margin-bottom: 4px; }
+.spec .v { font-size: 14px; font-weight: 600; color: #fff; word-break: break-word; }
+.spec .d { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+.disk-track { background: #1e293b; height: 6px; border-radius: 4px; margin-top: 6px; overflow: hidden; }
+.disk-fill { background: #3b82f6; height: 100%; }
+/* Tabla */
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.toolbar input, .toolbar select { background: #0b1226; border: 1px solid #334155; border-radius: 10px; color: #fff; padding: 8px 12px; font-size: 13px; }
+.toolbar input { flex: 1; min-width: 180px; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; padding: 10px 12px; border-bottom: 1px solid #1e293b; background: #0b1226; }
+td { padding: 10px 12px; border-bottom: 1px solid #16203a; vertical-align: top; }
+tr.device-row:hover td { background: #16203a; }
+.mono { font-family: Consolas, monospace; }
+.ip { color: #7dd3fc; } .mac { color: #64748b; font-size: 12px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #34d399; margin-right: 6px; }
+.type-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid #334155; background: #1e293b; color: #cbd5e1; }
+.type-badge.router { color: #c4b5fd; border-color: #6d28d9; } .type-badge.printer { color: #fcd34d; border-color: #92400e; }
+.type-badge.mobile { color: #6ee7b7; border-color: #065f46; } .type-badge.nas { color: #f9a8d4; border-color: #9d174d; }
+footer { text-align: center; color: #475569; font-size: 12px; padding: 16px 0; }
+@media print { body { background: #fff; color: #111; } .card, .metric, .node, .spec, .group { background: #fff; border-color: #ccc; } .btn, .toolbar { display: none; } }
+"""
+
+
+def type_badge_class(dev_type):
+    t = dev_type.lower()
+    if "router" in t or "gateway" in t:
+        return "router"
+    if "printer" in t:
+        return "printer"
+    if "mobile" in t:
+        return "mobile"
+    if "nas" in t or "server" in t:
+        return "nas"
+    return ""
 
 
 def generate_html_report(system_specs, network_data, output_path="network_report.html", scan_duration=None):
@@ -18,7 +100,6 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     wifi = network_data.get("wifi", {})
     public_ip = network_data.get("public_ip", "N/A")
     subnets = network_data.get("subnets_scanned", [])
-    routes = network_data.get("routes", [])
     nmap_available = network_data.get("nmap_available", False)
 
     local_hostname = system_specs.get('hostname', 'Desconocido')
@@ -33,7 +114,8 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     ram_available = system_specs.get('ram_available_gb', 'N/A')
     ram_percent = system_specs.get('ram_percent', 'N/A')
     disks = system_specs.get('disks', [])
-    interfaces = system_specs.get('network_interfaces', [])
+
+    primary_gateway = gateways[0] if gateways else {"gateway": "No detectado", "hostname": "N/A"}
 
     # Observaciones accionables para el lector del informe
     observations = []
@@ -46,412 +128,65 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     if not gateways:
         observations.append("No se detectó gateway: revisa la tabla de rutas del equipo o si hay conectividad.")
     if not nmap_available:
-        observations.append("nmap no está instalado: el descubrimiento se hizo solo por tabla ARP y puertos 80/443, así que pueden faltar dispositivos. Instalar nmap mejora la cobertura.")
+        observations.append("nmap no está instalado: el descubrimiento se hizo solo por tabla ARP y puertos 80/443, así que pueden faltar dispositivos que no respondan en esos puertos. Instalar nmap mejora la cobertura.")
     if not devices:
-        observations.append("No se encontraron dispositivos en la red.")
+        observations.append("No se detectaron dispositivos con este método; eso no significa que la red esté vacía: revisa cobertura (nmap) y permisos.")
     if not observations:
         observations.append("Sin observaciones: todos los dispositivos detectados tienen MAC y fabricante identificados.")
-    observations_html = "\n".join(f'<li class="text-sm text-slate-300">{esc(o)}</li>' for o in observations)
-    topology_limit = 40
-    topology_note = ""
-    if len(devices) > topology_limit:
-        topology_note = f'<p class="text-xs text-amber-400 mt-2">La topología muestra {topology_limit} de {len(devices)} dispositivos; la tabla de abajo los incluye todos.</p>'
+    observations_html = "\n".join(f"                <li>{esc(o)}</li>" for o in observations)
 
-    primary_gateway = gateways[0] if gateways else {"gateway": "No detectado", "hostname": "N/A", "device_type": "ISP Router / Gateway"}
-
-    # Count device types
+    # Clasificación: barras CSS (sin dependencias)
     type_counts = {}
     for d in devices:
         dt = d.get("device_type", "Unknown")
         type_counts[dt] = type_counts.get(dt, 0) + 1
-
     chart_labels = list(type_counts.keys())
-    chart_data = list(type_counts.values())
-
-    def js_json(value):
-        # json.dumps no escapa "</": un hostname con "</script>" rompería el HTML
-        return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
-
-    # Build vis-network nodes and edges data for dynamic topology
-    nodes = []
-    edges = []
-
-    # Node 0: WAN / Internet
-    nodes.append({
-        "id": "internet",
-        "label": f"Internet / WAN\n{public_ip}",
-        "group": "internet",
-        "shape": "dot",
-        "size": 30,
-        "color": "#38bdf8"
-    })
-
-    # Node 1: Gateway
-    gw_ip = primary_gateway.get('gateway', 'Gateway')
-    gw_host = primary_gateway.get('hostname', 'Router')
-    nodes.append({
-        "id": "gateway",
-        "label": f"Gateway / Router\n{gw_ip}\n{gw_host}",
-        "group": "gateway",
-        "shape": "diamond",
-        "size": 25,
-        "color": "#a855f7"
-    })
-    edges.append({"from": "gateway", "to": "internet", "color": "#38bdf8", "width": 3})
-
-    # Node 2: Local Host
-    local_ip = "127.0.0.1"
-    for iface in interfaces:
-        for addr in iface.get('ip_addresses', []):
-            if not addr.get('ip', '').startswith('127.'):
-                local_ip = addr.get('ip')
-                break
-        if local_ip != "127.0.0.1":
-            break
-
-    nodes.append({
-        "id": "localhost",
-        "label": f"Anfitrión ({local_hostname})\n{local_ip}",
-        "group": "host",
-        "shape": "box",
-        "size": 25,
-        "color": "#10b981"
-    })
-    edges.append({"from": "localhost", "to": "gateway", "color": "#10b981", "width": 2})
-
-    # Devices nodes
-    for idx, dev in enumerate(devices[:topology_limit]):
-        dev_id = f"dev_{idx}"
-        dev_ip = dev.get('ip', 'N/A')
-        dev_host = dev.get('hostname', 'Desconocido')
-        dev_type = dev.get('device_type', 'Dispositivo')
-        
-        color = "#3b82f6"
-        if "Router" in dev_type or "Gateway" in dev_type:
-            color = "#a855f7"
-        elif "Printer" in dev_type:
-            color = "#f59e0b"
-        elif "Mobile" in dev_type:
-            color = "#10b981"
-        elif "NAS" in dev_type or "Server" in dev_type:
-            color = "#ec4899"
-
-        nodes.append({
-            "id": dev_id,
-            "label": f"{dev_host}\n{dev_ip}\n[{dev_type}]",
-            "group": dev_type,
-            "shape": "ellipse",
-            "color": color
-        })
-        edges.append({"from": dev_id, "to": "gateway", "color": "#64748b", "width": 1, "dashes": True})
-
-    html_content = f"""<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NetworkMapperTool - NOC & Topology Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"></script>
-    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        body {{ font-family: 'Inter', sans-serif; background-color: #070d1d; color: #f8fafc; }}
-        .glass-card {{ background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }}
-        .table-row-hover:hover {{ background-color: rgba(30, 41, 59, 0.8); }}
-        #networkTopology {{ width: 100%; height: 500px; background-color: #020617; border-radius: 1rem; border: 1px solid #1e293b; }}
-    </style>
-    <script>
-        document.addEventListener("DOMContentLoaded", function() {{
-            // Chart.js Device Types Breakdown
-            const ctx = document.getElementById('deviceChart').getContext('2d');
-            new Chart(ctx, {{
-                type: 'doughnut',
-                data: {{
-                    labels: {js_json(chart_labels)},
-                    datasets: [{{
-                        data: {js_json(chart_data)},
-                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#6366f1'],
-                        borderWidth: 0
-                    }}]
-                }},
-                options: {{
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {{
-                        legend: {{ position: 'bottom', labels: {{ color: '#cbd5e1', font: {{ size: 11, family: 'Inter' }} }} }}
-                    }}
-                }}
-            }});
-
-            // Vis-Network Dynamic Topology
-            const nodes = new vis.DataSet({js_json(nodes)});
-            const edges = new vis.DataSet({js_json(edges)});
-            const container = document.getElementById('networkTopology');
-            const data = {{ nodes: nodes, edges: edges }};
-            const options = {{
-                nodes: {{
-                    font: {{ color: '#f8fafc', size: 12, face: 'Inter' }},
-                    borderWidth: 2,
-                    shadow: true
-                }},
-                edges: {{
-                    smooth: {{ type: 'cubicBezier', roundness: 0.2 }}
-                }},
-                physics: {{
-                    barnesHut: {{ gravitationalConstant: -3000, centralGravity: 0.4, springLength: 95 }}
-                }},
-                interaction: {{ hover: true, zoomView: true, dragNodes: true }}
-            }};
-            const network = new vis.Network(container, data, options);
-
-            // Real-time Search Filter
-            const searchInput = document.getElementById('searchInput');
-            const typeFilter = document.getElementById('typeFilter');
-            const rows = document.querySelectorAll('.device-row');
-
-            function filterTable() {{
-                const query = searchInput.value.toLowerCase();
-                const selectedType = typeFilter.value.toLowerCase();
-
-                rows.forEach(row => {{
-                    const text = row.innerText.toLowerCase();
-                    const type = row.getAttribute('data-type').toLowerCase();
-                    const matchesQuery = text.includes(query);
-                    const matchesType = !selectedType || type.includes(selectedType);
-
-                    if (matchesQuery && matchesType) {{
-                        row.style.display = '';
-                    }} else {{
-                        row.style.display = 'none';
-                    }}
-                }});
-            }}
-
-            searchInput.addEventListener('input', filterTable);
-            typeFilter.addEventListener('change', filterTable);
-        }});
-    </script>
-</head>
-<body class="min-h-screen py-8 px-4 sm:px-6 lg:px-8">
-    <div class="max-w-7xl mx-auto space-y-8">
-        
-        <!-- Header -->
-        <header class="glass-card rounded-3xl p-8 relative overflow-hidden">
-            <div class="absolute -right-20 -top-20 w-80 h-80 bg-blue-600 opacity-15 rounded-full blur-3xl"></div>
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center relative z-10 gap-6">
-                <div>
-                    <div class="flex items-center space-x-3 mb-2">
-                        <span class="bg-gradient-to-tr from-blue-600 to-indigo-600 text-white p-3.5 rounded-2xl shadow-lg"><i class="fas fa-shield-alt text-2xl"></i></span>
-                        <div>
-                            <h1 class="text-3xl font-extrabold tracking-tight text-white">NetworkMapperTool NOC</h1>
-                            <p class="text-xs text-blue-400 font-mono mt-0.5">ESTACIÓN DE MONITOREO Y TOPOLOGÍA DE RED</p>
-                        </div>
-                        <span class="bg-blue-950 text-blue-300 text-xs px-3 py-1 rounded-full font-mono border border-blue-800">v1.2.0</span>
-                    </div>
-                    <p class="text-slate-400 text-sm mt-1">Escaneo multi-segmento avanzado, integración Nmap y telemetría de hardware en tiempo real.</p>
+    max_count = max(type_counts.values()) if type_counts else 1
+    bars_html = ""
+    for label, count in sorted(type_counts.items(), key=lambda kv: -kv[1]):
+        pct = max(4, round(100 * count / max_count))
+        bars_html += f"""                <div class="bar-row">
+                    <span>{esc(label)}</span>
+                    <div class="bar-track"><div class="bar-fill" style="width: {pct}%"></div></div>
+                    <span class="bar-count">{count}</span>
                 </div>
-                <div class="flex flex-wrap gap-4 items-center">
-                    <div class="glass-card px-5 py-3 rounded-2xl border border-slate-800 text-right">
-                        <p class="text-xs text-slate-400 uppercase tracking-wider">IP Pública (WAN)</p>
-                        <p class="text-lg font-bold font-mono text-emerald-400">{esc(public_ip)}</p>
-                    </div>
-                    <div class="glass-card px-5 py-3 rounded-2xl border border-slate-800 text-right">
-                        <p class="text-xs text-slate-400 uppercase tracking-wider">Nmap Engine</p>
-                        <p class="text-sm font-bold font-mono {'text-emerald-400' if nmap_available else 'text-amber-400'}">{'Activo / Portátil' if nmap_available else 'Fallback Nativo'}</p>
-                    </div>
-                    <button onclick="window.print()" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-3 rounded-2xl font-semibold shadow-lg transition flex items-center space-x-2">
-                        <i class="fas fa-print"></i> <span>Exportar / PDF</span>
-                    </button>
-                </div>
-            </div>
-        </header>
-
-        <!-- Summary Metric Cards -->
-        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div class="glass-card p-6 rounded-3xl border-l-4 border-blue-500 shadow-xl relative overflow-hidden">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Dispositivos Totales</p>
-                        <p class="text-3xl font-extrabold text-white mt-1">{len(devices)}</p>
-                    </div>
-                    <div class="bg-blue-500 bg-opacity-20 p-4 rounded-2xl text-blue-400"><i class="fas fa-laptop-house text-2xl"></i></div>
-                </div>
-            </div>
-            <div class="glass-card p-6 rounded-3xl border-l-4 border-emerald-500 shadow-xl relative overflow-hidden">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Subredes Alcanzables</p>
-                        <p class="text-3xl font-extrabold text-white mt-1">{len(subnets)}</p>
-                    </div>
-                    <div class="bg-emerald-500 bg-opacity-20 p-4 rounded-2xl text-emerald-400"><i class="fas fa-project-diagram text-2xl"></i></div>
-                </div>
-            </div>
-            <div class="glass-card p-6 rounded-3xl border-l-4 border-amber-500 shadow-xl relative overflow-hidden">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Red Wi-Fi Actual</p>
-                        <p class="text-base font-bold text-white mt-1 truncate max-w-[180px]">{esc(wifi.get('ssid', 'N/A'))}</p>
-                    </div>
-                    <div class="bg-amber-500 bg-opacity-20 p-4 rounded-2xl text-amber-400"><i class="fas fa-wifi text-2xl"></i></div>
-                </div>
-            </div>
-            <div class="glass-card p-6 rounded-3xl border-l-4 border-purple-500 shadow-xl relative overflow-hidden">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Anfitrión Local</p>
-                        <p class="text-base font-bold text-white mt-1 truncate max-w-[180px]">{esc(local_hostname)}</p>
-                    </div>
-                    <div class="bg-purple-500 bg-opacity-20 p-4 rounded-2xl text-purple-400"><i class="fas fa-server text-2xl"></i></div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Observaciones accionables -->
-        <section class="glass-card rounded-3xl p-6 shadow-xl">
-            <h3 class="text-lg font-bold text-white mb-2 flex items-center"><i class="fas fa-clipboard-check mr-2 text-amber-400"></i> Observaciones</h3>
-            <ul class="list-disc list-inside space-y-1.5">
-{observations_html}
-            </ul>
-        </section>
-
-        <!-- Dynamic Topology & Chart Section -->
-        <section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- Dynamic Vis-Network Topology (2 cols) -->
-            <div class="glass-card p-6 rounded-3xl shadow-xl lg:col-span-2 flex flex-col justify-between">
-                <div>
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-lg font-bold text-white flex items-center"><i class="fas fa-project-diagram mr-2 text-indigo-400"></i> Topología Dinámica de Red (Vis-Network)</h3>
-                        <span class="text-xs text-slate-400 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">Interactiva / Física</span>
-                    </div>
-                    <p class="text-xs text-slate-400 mb-4">Mapa de relaciones interactivo. Puede arrastrar nodos, hacer zoom y explorar la conectividad de red.</p>
-                </div>
-                <div id="networkTopology"></div>
-{topology_note}
-            </div>
-
-            <!-- Chart Breakdown (1 col) -->
-            <div class="glass-card p-6 rounded-3xl shadow-xl flex flex-col justify-between">
-                <div>
-                    <h3 class="text-lg font-bold text-white mb-2 flex items-center"><i class="fas fa-chart-pie mr-2 text-blue-400"></i> Clasificación de Dispositivos</h3>
-                    <p class="text-xs text-slate-400 mb-4">Proporción de tipos de dispositivos identificados.</p>
-                </div>
-                <div class="relative h-64 w-full">
-                    <canvas id="deviceChart"></canvas>
-                </div>
-                <div class="mt-4 pt-4 border-t border-slate-800 text-xs text-slate-400 text-center">
-                    Actualizado al {scan_time}{f' · Escaneo de {scan_duration:.1f} s' if scan_duration is not None else ''}
-                </div>
-            </div>
-        </section>
-
-        <!-- Hardware Specs & Subnets Section -->
-        <section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- Host Hardware Specs (2 cols) -->
-            <div class="glass-card p-6 rounded-3xl shadow-xl lg:col-span-2 flex flex-col justify-between">
-                <div>
-                    <h3 class="text-lg font-bold text-white mb-4 flex items-center"><i class="fas fa-microchip mr-2 text-emerald-400"></i> Inventario de Hardware Local ({esc(os_info)})</h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                        <div class="bg-slate-900 bg-opacity-60 p-4 rounded-2xl border border-slate-800">
-                            <p class="text-xs text-slate-400 mb-1"><i class="fas fa-microchip mr-1"></i> Procesador CPU</p>
-                            <p class="text-sm font-semibold text-white">{esc(cpu_model)}</p>
-                            <p class="text-xs text-slate-400 mt-2">Núcleos: <span class="text-white font-mono">{cpu_cores_physical}F / {cpu_cores_logical}L</span> | Carga: <span class="text-emerald-400 font-mono">{cpu_usage_txt}%</span></p>
-                        </div>
-                        <div class="bg-slate-900 bg-opacity-60 p-4 rounded-2xl border border-slate-800">
-                            <p class="text-xs text-slate-400 mb-1"><i class="fas fa-memory mr-1"></i> Memoria RAM</p>
-                            <p class="text-sm font-semibold text-white">{ram_total} GB Total</p>
-                            <p class="text-xs text-slate-400 mt-2">Libre: <span class="text-white font-mono">{ram_available} GB</span> | Uso: <span class="text-amber-400 font-mono">{ram_percent}%</span></p>
-                        </div>
-                    </div>
-                    <!-- Disks -->
-                    <div>
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Unidades de Almacenamiento</p>
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
 """
 
+    # Topología inferida (estática): WAN -> Gateway -> grupos por tipo
+    groups_html = ""
+    for label, count in sorted(type_counts.items(), key=lambda kv: -kv[1]):
+        chips = ""
+        for d in devices:
+            if d.get("device_type", "Unknown") != label:
+                continue
+            host = d.get("hostname", "Desconocido")
+            ip = d.get("ip", "N/A")
+            name = host if host and host != "Desconocido" else "sin nombre"
+            chips += f'<span class="chip">{esc(name)} <span class="ip">{esc(ip)}</span></span> '
+        groups_html += f"""                <div class="group">
+                    <div class="gt">{esc(label)} ({count})</div>
+                    <div>{chips}</div>
+                </div>
+"""
+
+    duration_txt = f" · Escaneo de {scan_duration:.1f} s" if scan_duration is not None else ""
+
+    disks_html = ""
     for disk in disks:
-        html_content += f"""
-                            <div class="bg-slate-900 bg-opacity-50 p-3 rounded-xl border border-slate-800">
-                                <p class="text-xs font-bold text-white">{esc(disk.get('device'))} ({esc(disk.get('mountpoint'))})</p>
-                                <p class="text-xs text-slate-400 mt-1">Total: {esc(disk.get('total_gb'))} GB | Libre: <span class="text-emerald-400">{esc(disk.get('free_gb'))} GB</span></p>
-                                <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
-                                    <div class="bg-blue-500 h-full" style="width: {disk.get('percent', 0)}%"></div>
-                                </div>
-                            </div>
-"""
-
-    html_content += f"""
-                        </div>
+        disks_html += f"""                    <div class="spec">
+                        <div class="k">{esc(disk.get('device'))} ({esc(disk.get('mountpoint'))})</div>
+                        <div class="d">Total: {esc(disk.get('total_gb'))} GB | Libre: <span style="color:#34d399">{esc(disk.get('free_gb'))} GB</span></div>
+                        <div class="disk-track"><div class="disk-fill" style="width: {disk.get('percent', 0)}%"></div></div>
                     </div>
-                </div>
-            </div>
-
-            <!-- Subnets & Routes (1 col) -->
-            <div class="glass-card p-6 rounded-3xl shadow-xl flex flex-col justify-between">
-                <div>
-                    <h3 class="text-lg font-bold text-white mb-2 flex items-center"><i class="fas fa-route mr-2 text-teal-400"></i> Subredes Descubiertas</h3>
-                    <p class="text-xs text-slate-400 mb-4">Segmentos de red analizados en paralelo.</p>
-                    
-                    <div class="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
 """
 
+    subnets_html = ""
     for sub in subnets:
-        html_content += f"""
-                        <div class="bg-slate-900 bg-opacity-60 px-3.5 py-2.5 rounded-xl border border-slate-800 flex justify-between items-center text-xs">
-                            <span class="font-mono text-emerald-400"><i class="fas fa-network-wired mr-2"></i>{esc(sub)}</span>
-                            <span class="bg-slate-800 text-slate-400 px-2 py-0.5 rounded">Activa</span>
-                        </div>
-"""
+        subnets_html += f'<span class="chip"><span class="ip">{esc(sub)}</span> activa</span> '
 
-    html_content += f"""
-                    </div>
-                </div>
-                <div class="text-xs text-slate-500 border-t border-slate-800 pt-3 mt-4 text-center">
-                    NetworkMapperTool NOC Dashboard
-                </div>
-            </div>
-        </section>
+    filter_options = "".join(f'<option value="{esc(t)}">{esc(t)}</option>' for t in chart_labels)
 
-        <!-- Devices Table Section -->
-        <section class="glass-card rounded-3xl shadow-xl overflow-hidden">
-            <div class="p-6 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-center gap-4">
-                <div>
-                    <h3 class="text-xl font-bold text-white flex items-center"><i class="fas fa-list-ul mr-2 text-blue-400"></i> Inventario de Dispositivos en Red</h3>
-                    <p class="text-xs text-slate-400 mt-1">Búsqueda y filtrado instantáneo por IP, Hostname, MAC o Clasificación.</p>
-                </div>
-                <div class="flex flex-wrap gap-3 w-full sm:w-auto">
-                    <div class="relative flex-1 sm:w-64">
-                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400"><i class="fas fa-search"></i></span>
-                        <input type="text" id="searchInput" placeholder="Buscar dispositivo..." class="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-sm focus:outline-none focus:border-blue-500">
-                    </div>
-                    <select id="typeFilter" class="bg-slate-900 border border-slate-800 rounded-xl px-4 py-2 text-white text-sm focus:outline-none focus:border-blue-500">
-                        <option value="">Todos los Tipos</option>
-"""
-
-    for t in chart_labels:
-        html_content += f'<option value="{esc(t)}">{esc(t)}</option>\n'
-
-    html_content += f"""
-                    </select>
-                </div>
-            </div>
-
-            <div class="overflow-x-auto">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="bg-slate-900 bg-opacity-70 text-slate-400 text-xs uppercase tracking-wider border-b border-slate-800">
-                            <th class="py-4 px-6">Dispositivo / Host</th>
-                            <th class="py-4 px-6">Dirección IP</th>
-                            <th class="py-4 px-6">Dirección MAC</th>
-                            <th class="py-4 px-6">Fabricante (Vendor)</th>
-                            <th class="py-4 px-6">Clasificación</th>
-                            <th class="py-4 px-6">Estado / Origen</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-800 text-sm">
-"""
-
+    rows_html = ""
     for dev in devices:
         dev_ip = dev.get("ip", "N/A")
         dev_mac = dev.get("mac", "N/A")
@@ -459,52 +194,147 @@ def generate_html_report(system_specs, network_data, output_path="network_report
         dev_type = dev.get("device_type", "Desconocido")
         dev_vendor = dev.get("vendor", "Desconocido")
         dev_status = dev.get("status", "Online")
-        
-        badge_color = "bg-blue-950 text-blue-300 border-blue-800"
-        if "Router" in dev_type or "Gateway" in dev_type:
-            badge_color = "bg-purple-950 text-purple-300 border-purple-800"
-        elif "Printer" in dev_type:
-            badge_color = "bg-amber-950 text-amber-300 border-amber-800"
-        elif "Mobile" in dev_type:
-            badge_color = "bg-emerald-950 text-emerald-300 border-emerald-800"
-        elif "NAS" in dev_type or "Server" in dev_type:
-            badge_color = "bg-pink-950 text-pink-300 border-pink-800"
-
-        html_content += f"""
-                        <tr class="table-row-hover device-row" data-type="{esc(dev_type)}">
-                            <td class="py-4 px-6 font-medium text-white flex items-center space-x-3">
-                                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400"></span>
-                                <span>{esc(dev_host)}</span>
-                            </td>
-                            <td class="py-4 px-6 font-mono text-blue-300">{esc(dev_ip)}</td>
-                            <td class="py-4 px-6 font-mono text-slate-400 text-xs">{esc(dev_mac)}</td>
-                            <td class="py-4 px-6 text-slate-300">{esc(dev_vendor)}</td>
-                            <td class="py-4 px-6">
-                                <span class="px-3 py-1 rounded-full text-xs font-semibold border {badge_color}">{esc(dev_type)}</span>
-                            </td>
-                            <td class="py-4 px-6 text-xs text-slate-400">
-                                <span class="bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">{esc(dev_status)}</span>
-                            </td>
-                        </tr>
+        badge = type_badge_class(dev_type)
+        rows_html += f"""                    <tr class="device-row" data-type="{esc(dev_type)}">
+                        <td><span class="dot"></span>{esc(dev_host)}</td>
+                        <td class="mono ip">{esc(dev_ip)}</td>
+                        <td class="mono mac">{esc(dev_mac)}</td>
+                        <td>{esc(dev_vendor)}</td>
+                        <td><span class="type-badge {badge}">{esc(dev_type)}</span></td>
+                        <td><span class="badge">{esc(dev_status)}</span></td>
+                    </tr>
 """
 
-    html_content += f"""
-                    </tbody>
-                </table>
+    html_content = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetworkMapperTool - Informe de Red</title>
+    <style>{CSS}</style>
+</head>
+<body>
+<div class="wrap">
+
+    <header class="card">
+        <div class="header-top">
+            <div>
+                <h1>🌐 NetworkMapperTool NOC <span class="badge">v1.2.0</span></h1>
+                <p class="sub" style="margin-top:6px">Informe de descubrimiento de red e inventario de hardware · {scan_time}{duration_txt}</p>
             </div>
-        </section>
+            <div class="badges">
+                <span class="badge">IP pública: <strong class="mono" style="color:#34d399">{esc(public_ip)}</strong></span>
+                <span class="badge {'ok' if nmap_available else 'warn'}">nmap: {'activo' if nmap_available else 'no instalado (respaldo nativo)'}</span>
+                <button class="btn" onclick="window.print()">Exportar / PDF</button>
+            </div>
+        </div>
+    </header>
 
-        <!-- Footer -->
-        <footer class="text-center text-xs text-slate-500 py-6">
-            <p>NetworkMapperTool NOC Dashboard &copy; 2026 - Auditoría y Mapeo de Redes de Alto Rendimiento</p>
-        </footer>
+    <section class="metrics">
+        <div class="metric"><div class="k">Dispositivos detectados</div><div class="v">{len(devices)}</div></div>
+        <div class="metric green"><div class="k">Subredes analizadas</div><div class="v">{len(subnets)}</div></div>
+        <div class="metric amber"><div class="k">Red Wi-Fi actual</div><div class="v small">{esc(wifi.get('ssid', 'N/A'))}</div></div>
+        <div class="metric purple"><div class="k">Anfitrión local</div><div class="v small">{esc(local_hostname)}</div></div>
+    </section>
 
-    </div>
+    <section class="card" style="margin-top:20px">
+        <h2>📋 Observaciones</h2>
+        <ul class="obs">
+{observations_html}
+        </ul>
+    </section>
+
+    <section class="card">
+        <h2>🗺️ Mapa de la red (inferido)</h2>
+        <p class="sub">Mapa inferido a partir del gateway y los dispositivos detectados: no representa la topología física real (switches, cableado, VLANs).</p>
+        <div class="topo">
+            <div class="node wan"><div class="t">Internet / WAN</div><div class="n mono">{esc(public_ip)}</div></div>
+            <div class="connector"></div>
+            <div class="node gw"><div class="t">Gateway / Router</div><div class="n mono">{esc(primary_gateway.get('gateway', 'No detectado'))}</div><div class="t">{esc(primary_gateway.get('hostname', ''))}</div></div>
+            <div class="connector"></div>
+            <div class="groups">
+{groups_html if groups_html else '                <p class="sub">Sin dispositivos detectados para mostrar.</p>'}
+            </div>
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>📊 Clasificación de dispositivos</h2>
+        <p class="sub">Cantidad de dispositivos detectados por tipo.</p>
+{bars_html if bars_html else '        <p class="sub">Sin datos.</p>'}
+    </section>
+
+    <section class="card">
+        <h2>🖥️ Inventario de hardware local</h2>
+        <p class="sub">{esc(os_info)}</p>
+        <div class="spec-grid">
+            <div class="spec">
+                <div class="k">Procesador</div>
+                <div class="v">{esc(cpu_model)}</div>
+                <div class="d">Núcleos: {cpu_cores_physical}F / {cpu_cores_logical}L | Carga: {cpu_usage_txt}%</div>
+            </div>
+            <div class="spec">
+                <div class="k">Memoria RAM</div>
+                <div class="v">{ram_total} GB</div>
+                <div class="d">Libre: {ram_available} GB | Uso: {ram_percent}%</div>
+            </div>
+{disks_html}
+        </div>
+    </section>
+
+    <section class="card">
+        <h2>🛰️ Subredes analizadas</h2>
+        <div>{subnets_html if subnets_html else '<span class="sub">Ninguna detectada.</span>'}</div>
+    </section>
+
+    <section class="card">
+        <h2>🖧 Inventario de dispositivos detectados</h2>
+        <p class="sub">Los que respondieron al descubrimiento; pueden faltar dispositivos (ver Observaciones).</p>
+        <div class="toolbar">
+            <input type="text" id="searchInput" placeholder="Buscar por nombre, IP, MAC o fabricante...">
+            <select id="typeFilter">
+                <option value="">Todos los tipos</option>
+{filter_options}
+            </select>
+        </div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr><th>Dispositivo / Host</th><th>IP</th><th>MAC</th><th>Fabricante</th><th>Clasificación</th><th>Estado / Origen</th></tr>
+                </thead>
+                <tbody>
+{rows_html if rows_html else '                    <tr><td colspan="6" class="sub">Sin dispositivos detectados.</td></tr>'}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <footer>NetworkMapperTool v1.2.0 · Informe autocontenido, funciona sin conexión</footer>
+</div>
+<script>
+(function () {{
+    var searchInput = document.getElementById('searchInput');
+    var typeFilter = document.getElementById('typeFilter');
+    var rows = document.querySelectorAll('.device-row');
+    function filterTable() {{
+        var query = searchInput.value.toLowerCase();
+        var selectedType = typeFilter.value.toLowerCase();
+        rows.forEach(function (row) {{
+            var text = row.innerText.toLowerCase();
+            var type = (row.getAttribute('data-type') || '').toLowerCase();
+            var show = text.indexOf(query) !== -1 && (!selectedType || type.indexOf(selectedType) !== -1);
+            row.style.display = show ? '' : 'none';
+        }});
+    }}
+    searchInput.addEventListener('input', filterTable);
+    typeFilter.addEventListener('change', filterTable);
+}})();
+</script>
 </body>
 </html>
 """
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
-    
+
     return output_path

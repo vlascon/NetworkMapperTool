@@ -10,12 +10,16 @@ def resolve_hostname(ip):
         return "Desconocido"
 
 
-def resolve_hostnames_parallel(ips, max_workers=32):
+def resolve_hostnames_parallel(ips, max_workers=32, timeout=8.0):
     """Resuelve hostnames en paralelo, una sola consulta DNS por IP única.
 
     La resolución inversa de DNS es la parte más lenta de la clasificación:
     cada consulta puede tardar segundos si no hay respuesta. Resolver en
     paralelo y sin duplicados evita multiplicar esa espera por dispositivo.
+    El conjunto completo tiene una espera máxima (`timeout`): las consultas
+    que no respondan a tiempo quedan como "Desconocido" y el escaneo sigue.
+    (Un hilo ya bloqueado en el resolver no se puede matar, pero no detiene
+    al resto: terminará solo cuando el resolver del sistema responda.)
     """
     unique_ips = []
     seen = set()
@@ -28,10 +32,17 @@ def resolve_hostnames_parallel(ips, max_workers=32):
         return {}
 
     hostnames = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        results = executor.map(resolve_hostname, unique_ips)
-        for ip, hostname in zip(unique_ips, results):
-            hostnames[ip] = hostname
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        futures = {executor.submit(resolve_hostname, ip): ip for ip in unique_ips}
+        done, not_done = concurrent.futures.wait(futures, timeout=timeout)
+        for future in done:
+            hostnames[futures[future]] = future.result()
+        for future in not_done:
+            future.cancel()
+            hostnames[futures[future]] = "Desconocido"
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return hostnames
 
 

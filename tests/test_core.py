@@ -109,6 +109,19 @@ def test_resolver_tolerante_a_fallos(monkeypatch):
     assert resolve_hostnames_parallel(["10.0.0.9"]) == {"10.0.0.9": "Desconocido"}
 
 
+def test_resolver_tiene_espera_maxima(monkeypatch):
+    """Un resolver colgado no puede congelar el escaneo: espera acotada y sigue."""
+    def cuelgue(ip):
+        time.sleep(4)  # resolver que no responde a tiempo
+        return ("tarde", [], [ip])
+    monkeypatch.setattr(classifier.socket, "gethostbyaddr", cuelgue)
+    inicio = time.time()
+    resultado = resolve_hostnames_parallel(["10.0.0.1", "10.0.0.2"], timeout=1.0)
+    duracion = time.time() - inicio
+    assert duracion < 3.0, f"la espera no estuvo acotada: {duracion:.2f}s"
+    assert resultado == {"10.0.0.1": "Desconocido", "10.0.0.2": "Desconocido"}
+
+
 # ---------------------------------------------------------------- barrido TCP
 
 class FakeSocket:
@@ -187,7 +200,7 @@ def informe(tmp_path):
 def test_informe_muestra_hardware_real(informe):
     # Antes del arreglo el informe leía claves inexistentes y mostraba N/A
     assert "AMD Ryzen 7 5800X" in informe
-    assert "32.0 GB Total" in informe
+    assert "32.0 GB" in informe
     assert "Windows 11" in informe
     assert "12.5%" in informe
 
@@ -216,10 +229,22 @@ def test_informe_cierra_script_en_json(tmp_path):
     assert "</script><script>bad()" not in contenido
 
 
-def test_informe_avisa_truncamiento_topologia(tmp_path):
+def test_informe_incluye_todos_los_dispositivos(tmp_path):
     net = dict(NET)
     net["devices"] = [dict(NET["devices"][0], ip=f"192.168.1.{i}") for i in range(10, 55)]
     out = tmp_path / "i3.html"
     generate_html_report(SPECS, net, output_path=str(out))
     contenido = out.read_text(encoding="utf-8")
-    assert "muestra 40 de 45 dispositivos" in contenido
+    for i in range(10, 55):
+        assert f"192.168.1.{i}" in contenido
+
+
+def test_informe_es_autocontenido_sin_cdn(informe):
+    # El informe no debe depender de recursos externos: tiene que funcionar offline
+    for dominio in ("cdn.", "unpkg.com", "googleapis.com", "cdnjs", "jsdelivr"):
+        assert dominio not in informe, f"dependencia externa: {dominio}"
+
+
+def test_informe_topologia_marcada_como_inferida(informe):
+    assert "inferido" in informe.lower()
+    assert "no representa la topología física real" in informe
