@@ -71,6 +71,20 @@ Si prefieres ejecutar el script directamente desde el código fuente:
    python src/main.py
    ```
 
+   Opciones útiles:
+   ```bash
+   python src/main.py --no-dns        # omite resolución de nombres (más rápido)
+   python src/main.py --no-open       # no abrir el informe al terminar
+   python src/main.py -o informe.html # elegir nombre del informe
+   python src/main.py --threads 128   # más hilos para el barrido
+   ```
+
+4. **Ejecutar las pruebas** (usan fixtures locales, no tocan la red):
+   ```bash
+   pip install pytest
+   python -m pytest tests/
+   ```
+
 ---
 
 ## 🔨 Compilación del Ejecutable (.exe)

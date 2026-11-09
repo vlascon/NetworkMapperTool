@@ -33,6 +33,12 @@ def get_system_specs():
     except Exception:
         pass
 
+    # CPU usage (muestreo breve para el informe)
+    try:
+        specs["cpu_usage_percent"] = psutil.cpu_percent(interval=0.2)
+    except Exception:
+        specs["cpu_usage_percent"] = None
+
     # Disk partitions
     try:
         for partition in psutil.disk_partitions():

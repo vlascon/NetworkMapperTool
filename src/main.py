@@ -1,10 +1,11 @@
+import argparse
 import os
 import sys
 import time
 import webbrowser
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from src.hardware import get_system_specs
 from src.network_discovery import full_network_discovery
@@ -13,9 +14,30 @@ from src.reporter import generate_html_report
 
 console = Console()
 
-def main():
+DEFAULT_OUTPUT = "Mapa_Red_Inventario.html"
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        prog="NetworkMapperTool",
+        description="Auditoría de red local: descubrimiento multi-segmento, inventario de hardware e informe HTML."
+    )
+    parser.add_argument("--output", "-o", default=DEFAULT_OUTPUT,
+                        help=f"Ruta del informe HTML (por defecto: {DEFAULT_OUTPUT})")
+    parser.add_argument("--no-open", action="store_true",
+                        help="No abrir el informe en el navegador al terminar")
+    parser.add_argument("--no-dns", action="store_true",
+                        help="Omitir resolución de nombres DNS (más rápido, hostnames 'Desconocido')")
+    parser.add_argument("--threads", type=int, default=64,
+                        help="Hilos para el barrido de subred (por defecto: 64)")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+
     console.print(Panel.fit(
-        "[bold cyan]🌐 NetworkMapperTool v1.1.0[/bold cyan]\n"
+        "[bold cyan]🌐 NetworkMapperTool v1.2.0[/bold cyan]\n"
         "[dim]Auditoría avanzada de redes multi-segmento, Nmap y Dashboard NOC[/dim]",
         border_style="cyan"
     ))
@@ -25,50 +47,40 @@ def main():
     with Progress(
         SpinnerColumn("dots", style="cyan"),
         TextColumn("[bold progress.description]{task.description}"),
-        BarColumn(bar_width=30, complete_style="cyan", finished_style="green"),
-        TaskProgressColumn(),
         TimeElapsedColumn(),
         transient=False,
         console=console
     ) as progress:
-        
-        # Task 1: Hardware
-        task1 = progress.add_task("[yellow]Recopilando inventario de hardware local...", total=100)
-        for i in range(1, 4):
-            time.sleep(0.15)
-            progress.update(task1, advance=33)
+
+        # Task 1: Hardware (progreso real: la tarea dura lo que tarda get_system_specs)
+        task1 = progress.add_task("[yellow]Recopilando inventario de hardware local...", total=None)
         sys_specs = get_system_specs()
-        progress.update(task1, completed=100, description="[green]✓ Inventario de hardware completado")
+        progress.update(task1, completed=1, total=1, description="[green]✓ Inventario de hardware completado")
 
         # Task 2: Network Discovery & Nmap
-        task2 = progress.add_task("[yellow]Escaneando redes, rutas y segmentos (Multi-segmento / Nmap)...", total=100)
-        for i in range(1, 5):
-            time.sleep(0.2)
-            progress.update(task2, advance=20)
+        task2 = progress.add_task("[yellow]Escaneando redes, rutas y segmentos (Multi-segmento / Nmap)...", total=None)
         net_data = full_network_discovery()
-        progress.update(task2, completed=100, description="[green]✓ Escaneo de red y segmentos finalizado")
+        progress.update(task2, completed=1, total=1, description="[green]✓ Escaneo de red y segmentos finalizado")
 
         # Task 3: Classification & HTML Report
-        task3 = progress.add_task("[yellow]Clasificando dispositivos y generando Dashboard NOC HTML...", total=100)
-        for i in range(1, 4):
-            time.sleep(0.15)
-            progress.update(task3, advance=33)
-        enhanced_net = enhance_device_list(net_data)
-        output_filename = "Mapa_Red_Inventario.html"
-        output_path = os.path.abspath(output_filename)
-        generate_html_report(sys_specs, enhanced_net, output_path=output_path)
-        progress.update(task3, completed=100, description="[green]✓ Dashboard NOC HTML generado con éxito")
-
-    elapsed = time.time() - start_time
+        task3 = progress.add_task("[yellow]Clasificando dispositivos y generando Dashboard NOC HTML...", total=None)
+        enhanced_net = enhance_device_list(net_data, resolve=not args.no_dns, max_workers=max(1, args.threads // 2))
+        output_path = os.path.abspath(args.output)
+        elapsed = time.time() - start_time
+        generate_html_report(sys_specs, enhanced_net, output_path=output_path, scan_duration=elapsed)
+        progress.update(task3, completed=1, total=1, description="[green]✓ Dashboard NOC HTML generado con éxito")
 
     console.print(f"\n[bold green]✨ ¡Escaneo completado con éxito en {elapsed:.2f} segundos![/bold green]")
     console.print(f"[bold white]📁 Informe interactivo guardado en:[/bold white] [underline cyan]{output_path}[/underline cyan]\n")
 
-    # Open report automatically
-    try:
-        webbrowser.open(f"file:///{output_path}")
-    except Exception:
-        pass
+    if not args.no_open:
+        try:
+            webbrowser.open(f"file:///{output_path}")
+        except Exception:
+            pass
+
+    return output_path
+
 
 if __name__ == "__main__":
     try:

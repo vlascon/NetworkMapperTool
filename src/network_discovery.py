@@ -184,25 +184,19 @@ def get_arp_table():
         pass
     return arp_devices
 
-def ping_sweep_ip(ip_str):
-    """Realiza un ping rápido por socket o ping ICMP para descubrir hosts activos."""
-    try:
-        # Prueba rápida de conexión TCP en puertos comunes o socket connect
-        socket.setdefaulttimeout(0.3)
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = s.connect_ex((ip_str, 80))
-        s.close()
-        if result == 0:
-            return ip_str
-        
-        # Fallback a puerto 443 o 135
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result2 = s.connect_ex((ip_str, 443))
-        s.close()
-        if result2 == 0:
-            return ip_str
-    except Exception:
-        pass
+def ping_sweep_ip(ip_str, timeout=0.3):
+    """Prueba conexión TCP rápida en puertos comunes para descubrir hosts activos."""
+    for port in (80, 443):
+        try:
+            # Timeout por socket: no mutar el timeout global del proceso
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            result = s.connect_ex((ip_str, port))
+            s.close()
+            if result == 0:
+                return ip_str
+        except Exception:
+            pass
     return None
 
 def scan_subnet_concurrently(subnet_str, max_threads=64):
@@ -321,8 +315,11 @@ def full_network_discovery():
             for nd in nmap_results:
                 if nd["ip"] not in device_map:
                     device_map[nd["ip"]] = nd
-        
-        # Barrido concurrente complementario en subredes locales
+            # Con nmap activo el barrido TCP es redundante en la misma subred:
+            # nmap -sn descubre por ARP sin necesitar puertos abiertos.
+            continue
+
+        # Barrido concurrente solo cuando no hay nmap disponible
         active_ips = scan_subnet_concurrently(subnet)
         for ip in active_ips:
             if ip not in device_map:

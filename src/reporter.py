@@ -1,9 +1,18 @@
 import datetime
+import html
 import json
 
-def generate_html_report(system_specs, network_data, output_path="network_report.html"):
+
+def esc(value):
+    """Escapa valores interpolados en el HTML (hostnames y datos de red no son confiables)."""
+    if value is None:
+        return "N/A"
+    return html.escape(str(value))
+
+
+def generate_html_report(system_specs, network_data, output_path="network_report.html", scan_duration=None):
     scan_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
+
     devices = network_data.get("devices", [])
     gateways = network_data.get("gateways", [])
     wifi = network_data.get("wifi", {})
@@ -13,11 +22,40 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     nmap_available = network_data.get("nmap_available", False)
 
     local_hostname = system_specs.get('hostname', 'Desconocido')
-    os_info = system_specs.get('os_info', 'Windows')
-    cpu_info = system_specs.get('cpu_info', {})
-    ram_info = system_specs.get('ram_info', {})
+    # Claves reales producidas por src/hardware.get_system_specs()
+    os_info = system_specs.get('os', 'Desconocido')
+    cpu_model = system_specs.get('processor') or 'N/A'
+    cpu_cores_physical = system_specs.get('cpu_physical_cores', 'N/A')
+    cpu_cores_logical = system_specs.get('cpu_logical_cores', 'N/A')
+    cpu_usage = system_specs.get('cpu_usage_percent')
+    cpu_usage_txt = f"{cpu_usage}" if cpu_usage is not None else 'N/A'
+    ram_total = system_specs.get('ram_total_gb', 'N/A')
+    ram_available = system_specs.get('ram_available_gb', 'N/A')
+    ram_percent = system_specs.get('ram_percent', 'N/A')
     disks = system_specs.get('disks', [])
     interfaces = system_specs.get('network_interfaces', [])
+
+    # Observaciones accionables para el lector del informe
+    observations = []
+    no_mac = [d for d in devices if d.get("mac", "unknown") == "unknown"]
+    if no_mac:
+        observations.append(f"{len(no_mac)} dispositivo(s) detectado(s) solo por puerto abierto, sin MAC: no se pudo identificar fabricante ni tipo. Si nmap está disponible, un nuevo escaneo puede identificarlos.")
+    unknown_vendor = [d for d in devices if "desconocido" in str(d.get("vendor", "")).lower() and d.get("mac", "unknown") != "unknown"]
+    if unknown_vendor:
+        observations.append(f"{len(unknown_vendor)} dispositivo(s) con fabricante fuera de la base OUI local: conviene revisarlos a mano en la tabla.")
+    if not gateways:
+        observations.append("No se detectó gateway: revisa la tabla de rutas del equipo o si hay conectividad.")
+    if not nmap_available:
+        observations.append("nmap no está instalado: el descubrimiento se hizo solo por tabla ARP y puertos 80/443, así que pueden faltar dispositivos. Instalar nmap mejora la cobertura.")
+    if not devices:
+        observations.append("No se encontraron dispositivos en la red.")
+    if not observations:
+        observations.append("Sin observaciones: todos los dispositivos detectados tienen MAC y fabricante identificados.")
+    observations_html = "\n".join(f'<li class="text-sm text-slate-300">{esc(o)}</li>' for o in observations)
+    topology_limit = 40
+    topology_note = ""
+    if len(devices) > topology_limit:
+        topology_note = f'<p class="text-xs text-amber-400 mt-2">La topología muestra {topology_limit} de {len(devices)} dispositivos; la tabla de abajo los incluye todos.</p>'
 
     primary_gateway = gateways[0] if gateways else {"gateway": "No detectado", "hostname": "N/A", "device_type": "ISP Router / Gateway"}
 
@@ -29,6 +67,10 @@ def generate_html_report(system_specs, network_data, output_path="network_report
 
     chart_labels = list(type_counts.keys())
     chart_data = list(type_counts.values())
+
+    def js_json(value):
+        # json.dumps no escapa "</": un hostname con "</script>" rompería el HTML
+        return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
 
     # Build vis-network nodes and edges data for dynamic topology
     nodes = []
@@ -78,7 +120,7 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     edges.append({"from": "localhost", "to": "gateway", "color": "#10b981", "width": 2})
 
     # Devices nodes
-    for idx, dev in enumerate(devices[:40]):
+    for idx, dev in enumerate(devices[:topology_limit]):
         dev_id = f"dev_{idx}"
         dev_ip = dev.get('ip', 'N/A')
         dev_host = dev.get('hostname', 'Desconocido')
@@ -127,9 +169,9 @@ def generate_html_report(system_specs, network_data, output_path="network_report
             new Chart(ctx, {{
                 type: 'doughnut',
                 data: {{
-                    labels: {json.dumps(chart_labels)},
+                    labels: {js_json(chart_labels)},
                     datasets: [{{
-                        data: {json.dumps(chart_data)},
+                        data: {js_json(chart_data)},
                         backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#6366f1'],
                         borderWidth: 0
                     }}]
@@ -144,8 +186,8 @@ def generate_html_report(system_specs, network_data, output_path="network_report
             }});
 
             // Vis-Network Dynamic Topology
-            const nodes = new vis.DataSet({json.dumps(nodes)});
-            const edges = new vis.DataSet({json.dumps(edges)});
+            const nodes = new vis.DataSet({js_json(nodes)});
+            const edges = new vis.DataSet({js_json(edges)});
             const container = document.getElementById('networkTopology');
             const data = {{ nodes: nodes, edges: edges }};
             const options = {{
@@ -206,14 +248,14 @@ def generate_html_report(system_specs, network_data, output_path="network_report
                             <h1 class="text-3xl font-extrabold tracking-tight text-white">NetworkMapperTool NOC</h1>
                             <p class="text-xs text-blue-400 font-mono mt-0.5">ESTACIÓN DE MONITOREO Y TOPOLOGÍA DE RED</p>
                         </div>
-                        <span class="bg-blue-950 text-blue-300 text-xs px-3 py-1 rounded-full font-mono border border-blue-800">v1.1.0</span>
+                        <span class="bg-blue-950 text-blue-300 text-xs px-3 py-1 rounded-full font-mono border border-blue-800">v1.2.0</span>
                     </div>
                     <p class="text-slate-400 text-sm mt-1">Escaneo multi-segmento avanzado, integración Nmap y telemetría de hardware en tiempo real.</p>
                 </div>
                 <div class="flex flex-wrap gap-4 items-center">
                     <div class="glass-card px-5 py-3 rounded-2xl border border-slate-800 text-right">
                         <p class="text-xs text-slate-400 uppercase tracking-wider">IP Pública (WAN)</p>
-                        <p class="text-lg font-bold font-mono text-emerald-400">{public_ip}</p>
+                        <p class="text-lg font-bold font-mono text-emerald-400">{esc(public_ip)}</p>
                     </div>
                     <div class="glass-card px-5 py-3 rounded-2xl border border-slate-800 text-right">
                         <p class="text-xs text-slate-400 uppercase tracking-wider">Nmap Engine</p>
@@ -250,7 +292,7 @@ def generate_html_report(system_specs, network_data, output_path="network_report
                 <div class="flex justify-between items-center">
                     <div>
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Red Wi-Fi Actual</p>
-                        <p class="text-base font-bold text-white mt-1 truncate max-w-[180px]">{wifi.get('ssid', 'N/A')}</p>
+                        <p class="text-base font-bold text-white mt-1 truncate max-w-[180px]">{esc(wifi.get('ssid', 'N/A'))}</p>
                     </div>
                     <div class="bg-amber-500 bg-opacity-20 p-4 rounded-2xl text-amber-400"><i class="fas fa-wifi text-2xl"></i></div>
                 </div>
@@ -259,11 +301,19 @@ def generate_html_report(system_specs, network_data, output_path="network_report
                 <div class="flex justify-between items-center">
                     <div>
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Anfitrión Local</p>
-                        <p class="text-base font-bold text-white mt-1 truncate max-w-[180px]">{local_hostname}</p>
+                        <p class="text-base font-bold text-white mt-1 truncate max-w-[180px]">{esc(local_hostname)}</p>
                     </div>
                     <div class="bg-purple-500 bg-opacity-20 p-4 rounded-2xl text-purple-400"><i class="fas fa-server text-2xl"></i></div>
                 </div>
             </div>
+        </section>
+
+        <!-- Observaciones accionables -->
+        <section class="glass-card rounded-3xl p-6 shadow-xl">
+            <h3 class="text-lg font-bold text-white mb-2 flex items-center"><i class="fas fa-clipboard-check mr-2 text-amber-400"></i> Observaciones</h3>
+            <ul class="list-disc list-inside space-y-1.5">
+{observations_html}
+            </ul>
         </section>
 
         <!-- Dynamic Topology & Chart Section -->
@@ -278,6 +328,7 @@ def generate_html_report(system_specs, network_data, output_path="network_report
                     <p class="text-xs text-slate-400 mb-4">Mapa de relaciones interactivo. Puede arrastrar nodos, hacer zoom y explorar la conectividad de red.</p>
                 </div>
                 <div id="networkTopology"></div>
+{topology_note}
             </div>
 
             <!-- Chart Breakdown (1 col) -->
@@ -290,7 +341,7 @@ def generate_html_report(system_specs, network_data, output_path="network_report
                     <canvas id="deviceChart"></canvas>
                 </div>
                 <div class="mt-4 pt-4 border-t border-slate-800 text-xs text-slate-400 text-center">
-                    Actualizado al {scan_time}
+                    Actualizado al {scan_time}{f' · Escaneo de {scan_duration:.1f} s' if scan_duration is not None else ''}
                 </div>
             </div>
         </section>
@@ -300,17 +351,17 @@ def generate_html_report(system_specs, network_data, output_path="network_report
             <!-- Host Hardware Specs (2 cols) -->
             <div class="glass-card p-6 rounded-3xl shadow-xl lg:col-span-2 flex flex-col justify-between">
                 <div>
-                    <h3 class="text-lg font-bold text-white mb-4 flex items-center"><i class="fas fa-microchip mr-2 text-emerald-400"></i> Inventario de Hardware Local ({os_info})</h3>
+                    <h3 class="text-lg font-bold text-white mb-4 flex items-center"><i class="fas fa-microchip mr-2 text-emerald-400"></i> Inventario de Hardware Local ({esc(os_info)})</h3>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                         <div class="bg-slate-900 bg-opacity-60 p-4 rounded-2xl border border-slate-800">
                             <p class="text-xs text-slate-400 mb-1"><i class="fas fa-microchip mr-1"></i> Procesador CPU</p>
-                            <p class="text-sm font-semibold text-white">{cpu_info.get('model', 'N/A')}</p>
-                            <p class="text-xs text-slate-400 mt-2">Núcleos: <span class="text-white font-mono">{cpu_info.get('cores_physical', 'N/A')}F / {cpu_info.get('cores_logical', 'N/A')}L</span> | Carga: <span class="text-emerald-400 font-mono">{cpu_info.get('usage_percent', 'N/A')}%</span></p>
+                            <p class="text-sm font-semibold text-white">{esc(cpu_model)}</p>
+                            <p class="text-xs text-slate-400 mt-2">Núcleos: <span class="text-white font-mono">{cpu_cores_physical}F / {cpu_cores_logical}L</span> | Carga: <span class="text-emerald-400 font-mono">{cpu_usage_txt}%</span></p>
                         </div>
                         <div class="bg-slate-900 bg-opacity-60 p-4 rounded-2xl border border-slate-800">
                             <p class="text-xs text-slate-400 mb-1"><i class="fas fa-memory mr-1"></i> Memoria RAM</p>
-                            <p class="text-sm font-semibold text-white">{ram_info.get('total_gb', 'N/A')} GB Total</p>
-                            <p class="text-xs text-slate-400 mt-2">Libre: <span class="text-white font-mono">{ram_info.get('available_gb', 'N/A')} GB</span> | Uso: <span class="text-amber-400 font-mono">{ram_info.get('percent', 'N/A')}%</span></p>
+                            <p class="text-sm font-semibold text-white">{ram_total} GB Total</p>
+                            <p class="text-xs text-slate-400 mt-2">Libre: <span class="text-white font-mono">{ram_available} GB</span> | Uso: <span class="text-amber-400 font-mono">{ram_percent}%</span></p>
                         </div>
                     </div>
                     <!-- Disks -->
@@ -322,8 +373,8 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     for disk in disks:
         html_content += f"""
                             <div class="bg-slate-900 bg-opacity-50 p-3 rounded-xl border border-slate-800">
-                                <p class="text-xs font-bold text-white">{disk.get('device')} ({disk.get('mountpoint')})</p>
-                                <p class="text-xs text-slate-400 mt-1">Total: {disk.get('total_gb')} GB | Libre: <span class="text-emerald-400">{disk.get('free_gb')} GB</span></p>
+                                <p class="text-xs font-bold text-white">{esc(disk.get('device'))} ({esc(disk.get('mountpoint'))})</p>
+                                <p class="text-xs text-slate-400 mt-1">Total: {esc(disk.get('total_gb'))} GB | Libre: <span class="text-emerald-400">{esc(disk.get('free_gb'))} GB</span></p>
                                 <div class="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
                                     <div class="bg-blue-500 h-full" style="width: {disk.get('percent', 0)}%"></div>
                                 </div>
@@ -348,7 +399,7 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     for sub in subnets:
         html_content += f"""
                         <div class="bg-slate-900 bg-opacity-60 px-3.5 py-2.5 rounded-xl border border-slate-800 flex justify-between items-center text-xs">
-                            <span class="font-mono text-emerald-400"><i class="fas fa-network-wired mr-2"></i>{sub}</span>
+                            <span class="font-mono text-emerald-400"><i class="fas fa-network-wired mr-2"></i>{esc(sub)}</span>
                             <span class="bg-slate-800 text-slate-400 px-2 py-0.5 rounded">Activa</span>
                         </div>
 """
@@ -379,7 +430,7 @@ def generate_html_report(system_specs, network_data, output_path="network_report
 """
 
     for t in chart_labels:
-        html_content += f'<option value="{t}">{t}</option>\n'
+        html_content += f'<option value="{esc(t)}">{esc(t)}</option>\n'
 
     html_content += f"""
                     </select>
@@ -420,19 +471,19 @@ def generate_html_report(system_specs, network_data, output_path="network_report
             badge_color = "bg-pink-950 text-pink-300 border-pink-800"
 
         html_content += f"""
-                        <tr class="table-row-hover device-row" data-type="{dev_type}">
+                        <tr class="table-row-hover device-row" data-type="{esc(dev_type)}">
                             <td class="py-4 px-6 font-medium text-white flex items-center space-x-3">
                                 <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block shadow-sm shadow-emerald-400"></span>
-                                <span>{dev_host}</span>
+                                <span>{esc(dev_host)}</span>
                             </td>
-                            <td class="py-4 px-6 font-mono text-blue-300">{dev_ip}</td>
-                            <td class="py-4 px-6 font-mono text-slate-400 text-xs">{dev_mac}</td>
-                            <td class="py-4 px-6 text-slate-300">{dev_vendor}</td>
+                            <td class="py-4 px-6 font-mono text-blue-300">{esc(dev_ip)}</td>
+                            <td class="py-4 px-6 font-mono text-slate-400 text-xs">{esc(dev_mac)}</td>
+                            <td class="py-4 px-6 text-slate-300">{esc(dev_vendor)}</td>
                             <td class="py-4 px-6">
-                                <span class="px-3 py-1 rounded-full text-xs font-semibold border {badge_color}">{dev_type}</span>
+                                <span class="px-3 py-1 rounded-full text-xs font-semibold border {badge_color}">{esc(dev_type)}</span>
                             </td>
                             <td class="py-4 px-6 text-xs text-slate-400">
-                                <span class="bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">{dev_status}</span>
+                                <span class="bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">{esc(dev_status)}</span>
                             </td>
                         </tr>
 """
