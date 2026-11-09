@@ -80,20 +80,39 @@ def flujo_levantamiento(data_dir):
         console.print("[red]Se necesita un nombre de empresa.[/red]")
         return None
 
-    # 2. Levantamiento abierto o nuevo
-    abiertos = [l for l in lv.listar_levantamientos(data_dir, empresa) if l.get("estado") == "abierto"]
+    # 2. Levantamiento abierto, nuevo, o revisión de uno finalizado.
+    #    Los archivos corruptos se DECLARAN: sin esto el operador podría
+    #    creer que el levantamiento está completo.
+    todos, rechazados = lv.listar_levantamientos(data_dir, empresa, incluir_rechazados=True)
+    if rechazados:
+        console.print("\n[red]Archivos de levantamiento rechazados (corruptos o inválidos):[/red]")
+        for nombre in rechazados:
+            console.print(f"  [red]✗[/red] {nombre}")
+        console.print("[yellow]No se incluyeron sus datos; el levantamiento puede estar incompleto.[/yellow]")
+    abiertos = [l for l in todos if l.get("estado") == "abierto"]
+    finalizados = [l for l in todos if l.get("estado") == "finalizado"]
     if abiertos:
         console.print("\n[bold]Levantamientos abiertos:[/bold]")
         for i, l in enumerate(abiertos, 1):
             sede = f" · {l.get('sede')}" if l.get('sede') else ""
             console.print(f"  [cyan]{i}[/cyan]) {l['levantamiento_id']} · creado {l['creado_en'][:10]}{sede} · {len(l.get('equipos', []))} equipo(s)")
+    if finalizados:
+        console.print("\n[bold]Levantamientos finalizados:[/bold]")
+        for i, l in enumerate(finalizados, 1):
+            sede = f" · {l.get('sede')}" if l.get('sede') else ""
+            console.print(f"  [cyan]F{i}[/cyan]) {l['levantamiento_id']} · creado {l['creado_en'][:10]}{sede} · {len(l.get('equipos', []))} equipo(s)")
+    if abiertos or finalizados:
         console.print("  [cyan]N[/cyan]) Nuevo levantamiento independiente")
         eleccion = Prompt.ask("Elige", default="N")
-        if eleccion.strip().upper() == "N" or not eleccion.isdigit() or not (1 <= int(eleccion) <= len(abiertos)):
+        eleccion = eleccion.strip().upper()
+        if eleccion.startswith("F") and eleccion[1:].isdigit() and 1 <= int(eleccion[1:]) <= len(finalizados):
+            lev = finalizados[int(eleccion[1:]) - 1]
+            return _menu_finalizado(lev, data_dir)
+        if eleccion.isdigit() and 1 <= int(eleccion) <= len(abiertos):
+            lev = abiertos[int(eleccion) - 1]
+        else:
             sede = Prompt.ask("Sede o etiqueta (opcional)", default="")
             lev = lv.crear_levantamiento(empresa, sede=sede)
-        else:
-            lev = abiertos[int(eleccion) - 1]
     else:
         sede = Prompt.ask("Sede o etiqueta (opcional)", default="")
         lev = lv.crear_levantamiento(empresa, sede=sede)
@@ -124,12 +143,50 @@ def flujo_levantamiento(data_dir):
     console.print(f"[bold white]📁 Guardado en:[/bold white] [underline cyan]{destino}[/underline cyan]")
     console.print(f"[dim]Equipos en el levantamiento: {len(lev['equipos'])}[/dim]")
 
-    # 5. Cierre opcional
-    if Confirm.ask("\n¿Finalizar el levantamiento? (puedes seguir agregando equipos después si no lo cierras)", default=False):
+    # 5. Cierre opcional: finalizar NO es irreversible (se puede reabrir
+    #    con confirmación) y cada guardado conserva la revisión anterior.
+    if Confirm.ask("\n¿Finalizar el levantamiento? (puedes reabrirlo después para corregir)", default=False):
         lv.finalizar_levantamiento(lev)
         lv.guardar_levantamiento(lev, data_dir)
-        console.print("[green]✓ Levantamiento finalizado.[/green] El informe consolidado de equipos es la siguiente etapa de desarrollo.")
+        console.print("[green]✓ Levantamiento finalizado.[/green]")
+        if Confirm.ask("¿Generar el informe consolidado HTML ahora?", default=True):
+            _generar_informe_consolidado(lev, data_dir)
     return destino
+
+
+def _generar_informe_consolidado(lev, data_dir):
+    """Informe consolidado desde datos locales (fixtures o colecta real)."""
+    from src.reporter_consolidado import generate_consolidated_report
+    carpeta = os.path.dirname(lv.ruta_levantamiento(data_dir, lev))
+    nombre = f"informe-{lev['levantamiento_id']}.html"
+    destino = generate_consolidated_report(lev, os.path.join(carpeta, nombre))
+    console.print(f"[bold white]📄 Informe consolidado:[/bold white] [underline cyan]{destino}[/underline cyan]")
+    return destino
+
+
+def _menu_finalizado(lev, data_dir):
+    """Acciones sobre un levantamiento finalizado: informe o corrección.
+
+    Reabrir pide confirmación explícita: es el modo corrección controlado,
+    no una vuelta atrás silenciosa."""
+    console.print(f"\n[bold]{lev['levantamiento_id']}[/bold] (finalizado)")
+    console.print("  [cyan]I[/cyan]) Generar/actualizar informe consolidado")
+    console.print("  [cyan]R[/cyan]) Reabrir para corregir (queda abierto de nuevo)")
+    console.print("  [cyan]V[/cyan]) Volver sin cambios")
+    eleccion = Prompt.ask("Elige", default="V").strip().upper()
+    if eleccion == "I":
+        return _generar_informe_consolidado(lev, data_dir)
+    if eleccion == "R":
+        if Confirm.ask(
+            f"¿Reabrir '{lev['levantamiento_id']}'? Quedará abierto para seguir agregando o corrigiendo equipos.",
+            default=False,
+        ):
+            lv.reabrir_levantamiento(lev)
+            destino = lv.guardar_levantamiento(lev, data_dir)
+            console.print("[green]✓ Levantamiento reabierto.[/green] Vuelve a entrar para recolectar este PC.")
+            return destino
+    console.print("[dim]Sin cambios.[/dim]")
+    return None
 
 
 def main(argv=None):

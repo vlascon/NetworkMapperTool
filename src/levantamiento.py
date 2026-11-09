@@ -68,11 +68,18 @@ def listar_empresas(data_dir):
                   if os.path.isdir(os.path.join(data_dir, d)))
 
 
-def listar_levantamientos(data_dir, empresa):
+def listar_levantamientos(data_dir, empresa, incluir_rechazados=False):
+    """Lista levantamientos de una empresa.
+
+    Con incluir_rechazados=True devuelve (levs, rechazados): los archivos
+    corruptos se DECLARAN por nombre (sin su contenido) para que el
+    operador no crea que el levantamiento está completo.
+    """
     carpeta = ruta_empresa(data_dir, empresa)
     if not os.path.isdir(carpeta):
-        return []
+        return ([], []) if incluir_rechazados else []
     resultado = []
+    rechazados = []
     for nombre in sorted(os.listdir(carpeta)):
         if not nombre.endswith(".json"):
             continue
@@ -81,15 +88,21 @@ def listar_levantamientos(data_dir, empresa):
                 lev = json.load(fh)
             if isinstance(lev, dict) and lev.get("levantamiento_id"):
                 resultado.append(lev)
+            else:
+                rechazados.append(nombre)
         except Exception:
-            continue  # archivo corrupto: se ignora al listar, no al importar
+            rechazados.append(nombre)
+    if incluir_rechazados:
+        return resultado, rechazados
     return resultado
 
 
 # ---------------------------------------------------------------- guardado
 
 def guardar_levantamiento(lev, data_dir):
-    """Escritura atómica: temporal en la misma carpeta + renombrado."""
+    """Escritura atómica: temporal en la misma carpeta + renombrado.
+    Conserva la revisión anterior como .bak (una sola) para no perder
+    datos al sobrescribir."""
     lev["actualizado_en"] = ahora_iso()
     carpeta = ruta_empresa(data_dir, lev["empresa"])
     os.makedirs(carpeta, exist_ok=True)
@@ -99,12 +112,25 @@ def guardar_levantamiento(lev, data_dir):
         json.dump(lev, fh, ensure_ascii=False, indent=2)
         fh.flush()
         os.fsync(fh.fileno())
+    if os.path.exists(destino):
+        try:
+            import shutil as _shutil
+            _shutil.copy2(destino, destino + ".bak")
+        except Exception:
+            pass  # el respaldo es best-effort; nunca bloquea el guardado
     os.replace(temporal, destino)
     return destino
 
 
 def finalizar_levantamiento(lev):
     lev["estado"] = "finalizado"
+    return lev
+
+
+def reabrir_levantamiento(lev):
+    """Corrección controlada: reabrir un levantamiento finalizado.
+    La decisión es del operador (la CLI la confirma); aquí solo cambia estado."""
+    lev["estado"] = "abierto"
     return lev
 
 

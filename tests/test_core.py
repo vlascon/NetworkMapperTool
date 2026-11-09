@@ -544,3 +544,90 @@ def test_recolectar_equipo_wifi_linux(monkeypatch):
     assert eq["conexion"]["tipo_verificado"] is True
     assert eq["conexion"]["gateway"] == "192.168.1.1"
     assert eq["hostname"] == "PC-TEST"
+
+
+def test_listar_declara_archivos_corruptos(tmp_path):
+    lev = _lev_prueba()
+    lv.guardar_levantamiento(lev, str(tmp_path))
+    carpeta = lv.ruta_empresa(str(tmp_path), lev["empresa"])
+    with open(os.path.join(carpeta, "lev-roto.json"), "w") as fh:
+        fh.write("{no es json")
+    levs, rechazados = lv.listar_levantamientos(str(tmp_path), lev["empresa"], incluir_rechazados=True)
+    assert len(levs) == 1
+    assert rechazados == ["lev-roto.json"]
+    # compatibilidad: sin el flag devuelve solo la lista
+    assert len(lv.listar_levantamientos(str(tmp_path), lev["empresa"])) == 1
+
+
+def test_guardar_conserva_revision_anterior(tmp_path):
+    lev = _lev_prueba()
+    destino = lv.guardar_levantamiento(lev, str(tmp_path))
+    lv.merge_equipo(lev, _equipo_prueba(), lambda c: None)
+    lv.guardar_levantamiento(lev, str(tmp_path))
+    import json as _json
+    with open(destino + ".bak", encoding="utf-8") as fh:
+        anterior = _json.load(fh)
+    assert anterior["equipos"] == []
+    with open(destino, encoding="utf-8") as fh:
+        actual = _json.load(fh)
+    assert len(actual["equipos"]) == 1
+
+
+def test_reabrir_levantamiento():
+    lev = _lev_prueba()
+    lv.finalizar_levantamiento(lev)
+    assert lev["estado"] == "finalizado"
+    lv.reabrir_levantamiento(lev)
+    assert lev["estado"] == "abierto"
+
+
+# ------------------------------------------------- informe consolidado
+
+from src.reporter_consolidado import generate_consolidated_report
+
+
+def _lev_con_equipos():
+    lev = _lev_prueba()
+    eq1 = _equipo_prueba(equipo_id="eq-1", hostname="PC-CAJA")
+    eq1["conexion"]["wifi"] = {"ssid": "TiendaWiFi", "signal": "80%"}
+    eq1["conexion"]["interfaz_principal"] = "wlan0"
+    eq2 = _equipo_prueba(equipo_id="eq-2", hostname="PC-BODEGA", mac="aa:bb:cc:dd:ee:ff")
+    eq2["conexion"] = {"tipo": "desconocido", "tipo_verificado": False, "gateway": "192.168.1.1"}
+    lv.merge_equipo(lev, eq1, lambda c: None)
+    lv.merge_equipo(lev, eq2, lambda c: None)
+    return lev
+
+
+def test_consolidado_contiene_empresa_y_equipos(tmp_path):
+    lev = _lev_con_equipos()
+    salida = generate_consolidated_report(lev, str(tmp_path / "informe.html"))
+    with open(salida, encoding="utf-8") as fh:
+        html = fh.read()
+    assert "Empresa Prueba" in html
+    assert "PC-CAJA" in html and "PC-BODEGA" in html
+    assert "TiendaWiFi" in html
+    assert "192.168.1.1" in html
+
+
+def test_consolidado_honesto_verificado_vs_inferido(tmp_path):
+    lev = _lev_con_equipos()
+    salida = generate_consolidated_report(lev, str(tmp_path / "informe.html"))
+    with open(salida, encoding="utf-8") as fh:
+        html = fh.read()
+    assert "verificado en ese PC" in html          # PC-CAJA tiene tipo verificado
+    assert "no verificado" in html                 # PC-BODEGA desconocido
+    assert "agrupacion inferida" in html.lower()
+    assert "no demuestra" in html                  # límite declarado
+    assert "en claro" in html                      # cifrado pendiente declarado
+
+
+def test_consolidado_sin_cdn_y_escapa_html(tmp_path):
+    lev = _lev_con_equipos()
+    lev["empresa"] = '<script>alert("x")</script>'
+    salida = generate_consolidated_report(lev, str(tmp_path / "informe.html"))
+    with open(salida, encoding="utf-8") as fh:
+        html = fh.read()
+    for dominio in ("cdn.", "googleapis", "unpkg", "jsdelivr", "http://", "https://"):
+        assert dominio not in html
+    assert '<script>alert("x")</script>' not in html
+    assert "&lt;script&gt;" in html
