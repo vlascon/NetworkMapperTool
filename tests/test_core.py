@@ -808,3 +808,18 @@ def test_guardar_no_deja_temporal(tmp_path):
 def test_import_rechaza_contenedor_hostil_sin_kdf():
     ok, errores = lv.validar_levantamiento_bytes(_contenedor_hostil(4294967295, 8, 1), contrasena="x")
     assert ok is None and errores and "rango" in errores[0]
+
+
+def test_data_dir_anclado_al_proyecto_no_al_cwd(monkeypatch, tmp_path):
+    # Ejecutar desde otro directorio no debe mover los datos: el default
+    # apunta a <repo>/datos, que viaja con el pendrive entre PCs.
+    monkeypatch.chdir(tmp_path)
+    import importlib
+    import src.main as main_mod
+    importlib.reload(main_mod)
+    esperado = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(main_mod.__file__))), "datos")
+    args = main_mod.parse_args([])
+    assert os.path.normpath(args.data_dir) == os.path.normpath(esperado)
+    assert str(tmp_path) not in args.data_dir
+    importlib.reload(main_mod)  # restaurar estado del módulo

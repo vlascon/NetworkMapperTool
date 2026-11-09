@@ -3,6 +3,11 @@ import os
 import sys
 import time
 import webbrowser
+
+# Permite tanto `python3 -m src.main` como `python3 src/main.py` desde
+# cualquier cwd (clave para correrlo directo desde el pendrive).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
@@ -17,7 +22,12 @@ from src import levantamiento as lv
 console = Console()
 
 DEFAULT_OUTPUT = "Mapa_Red_Inventario.html"
-DEFAULT_DATA_DIR = os.path.abspath("datos")
+# Anclado a la carpeta del proyecto (que viaja en el pendrive), NO al
+# directorio desde donde se ejecuta: así un levantamiento se continúa
+# igual desde cualquier PC sin importar el cwd.
+DEFAULT_DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datos"
+)
 
 
 def parse_args(argv=None):
@@ -38,7 +48,7 @@ def parse_args(argv=None):
     parser.add_argument("--wan", action="store_true",
                         help="Consultar la IP pública a un servicio externo (por defecto la herramienta no habla con internet)")
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR,
-                        help="Carpeta de levantamientos (por defecto: ./datos; apunta al pendrive si lo usas)")
+                        help="Carpeta de levantamientos (por defecto: la carpeta 'datos' junto al programa; apunta a otra ruta si la necesitas)")
     return parser.parse_args(argv)
 
 
