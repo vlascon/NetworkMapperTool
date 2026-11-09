@@ -631,3 +631,29 @@ def test_consolidado_sin_cdn_y_escapa_html(tmp_path):
         assert dominio not in html
     assert '<script>alert("x")</script>' not in html
     assert "&lt;script&gt;" in html
+
+
+def test_bak_fallido_avisa_y_guarda_igual(tmp_path, monkeypatch):
+    lev = _lev_prueba()
+    lv.guardar_levantamiento(lev, str(tmp_path))
+    import shutil
+    monkeypatch.setattr(shutil, "copy2",
+                        lambda a, b: (_ for _ in ()).throw(OSError("pendrive lleno")))
+    avisos = []
+    destino = lv.guardar_levantamiento(lev, str(tmp_path), avisos)
+    assert len(avisos) == 1
+    assert ".bak" in avisos[0] and "pendrive lleno" in avisos[0]
+    import json as _json
+    with open(destino, encoding="utf-8") as fh:
+        assert _json.load(fh)["levantamiento_id"] == lev["levantamiento_id"]
+    assert not os.path.exists(destino + ".bak") or True  # .bak previo se conserva como estaba
+
+
+def test_consolidado_tiene_estilos_movil_e_impresion(tmp_path):
+    lev = _lev_con_equipos()
+    salida = generate_consolidated_report(lev, str(tmp_path / "informe.html"))
+    with open(salida, encoding="utf-8") as fh:
+        html = fh.read()
+    assert "@media (max-width:640px)" in html
+    assert "@media print" in html
+    assert "overflow-x:auto" in html

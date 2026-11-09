@@ -137,7 +137,10 @@ def flujo_levantamiento(data_dir):
         return candidatos[int(eleccion) - 1]["equipo"]["equipo_id"]
 
     resultado = lv.merge_equipo(lev, equipo, confirmar)
-    destino = lv.guardar_levantamiento(lev, data_dir)
+    avisos = []
+    destino = lv.guardar_levantamiento(lev, data_dir, avisos)
+    for aviso in avisos:
+        console.print(f"[yellow]⚠ {aviso}[/yellow]")
     verbo = "actualizado en" if resultado == "actualizado" else "agregado a"
     console.print(f"\n[green]✓ Equipo {verbo} el levantamiento.[/green]")
     console.print(f"[bold white]📁 Guardado en:[/bold white] [underline cyan]{destino}[/underline cyan]")
@@ -147,7 +150,10 @@ def flujo_levantamiento(data_dir):
     #    con confirmación) y cada guardado conserva la revisión anterior.
     if Confirm.ask("\n¿Finalizar el levantamiento? (puedes reabrirlo después para corregir)", default=False):
         lv.finalizar_levantamiento(lev)
-        lv.guardar_levantamiento(lev, data_dir)
+        avisos = []
+        lv.guardar_levantamiento(lev, data_dir, avisos)
+        for aviso in avisos:
+            console.print(f"[yellow]⚠ {aviso}[/yellow]")
         console.print("[green]✓ Levantamiento finalizado.[/green]")
         if Confirm.ask("¿Generar el informe consolidado HTML ahora?", default=True):
             _generar_informe_consolidado(lev, data_dir)
@@ -182,7 +188,10 @@ def _menu_finalizado(lev, data_dir):
             default=False,
         ):
             lv.reabrir_levantamiento(lev)
-            destino = lv.guardar_levantamiento(lev, data_dir)
+            avisos = []
+            destino = lv.guardar_levantamiento(lev, data_dir, avisos)
+            for aviso in avisos:
+                console.print(f"[yellow]⚠ {aviso}[/yellow]")
             console.print("[green]✓ Levantamiento reabierto.[/green] Vuelve a entrar para recolectar este PC.")
             return destino
     console.print("[dim]Sin cambios.[/dim]")

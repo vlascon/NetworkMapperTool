@@ -18,6 +18,7 @@ Reglas de honestidad del modelo:
 import datetime
 import platform
 import json
+import sys
 import os
 import re
 import uuid
@@ -99,10 +100,12 @@ def listar_levantamientos(data_dir, empresa, incluir_rechazados=False):
 
 # ---------------------------------------------------------------- guardado
 
-def guardar_levantamiento(lev, data_dir):
+def guardar_levantamiento(lev, data_dir, avisos=None):
     """Escritura atómica: temporal en la misma carpeta + renombrado.
     Conserva la revisión anterior como .bak (una sola) para no perder
-    datos al sobrescribir."""
+    datos al sobrescribir. Si el respaldo falla NO se calla: el aviso
+    llega a `avisos` (si se entrega una lista) para que el operador
+    sepa que está sobrescribiendo sin red de seguridad."""
     lev["actualizado_en"] = ahora_iso()
     carpeta = ruta_empresa(data_dir, lev["empresa"])
     os.makedirs(carpeta, exist_ok=True)
@@ -116,8 +119,16 @@ def guardar_levantamiento(lev, data_dir):
         try:
             import shutil as _shutil
             _shutil.copy2(destino, destino + ".bak")
-        except Exception:
-            pass  # el respaldo es best-effort; nunca bloquea el guardado
+        except Exception as exc:
+            aviso = (
+                "No se pudo conservar la revisión anterior (.bak) antes de "
+                f"sobrescribir {os.path.basename(destino)}: {exc}. "
+                "El guardado continúa, pero sin copia de respaldo."
+            )
+            if avisos is not None:
+                avisos.append(aviso)
+            else:
+                print(f"AVISO: {aviso}", file=sys.stderr)
     os.replace(temporal, destino)
     return destino
 

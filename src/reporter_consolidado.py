@@ -125,6 +125,27 @@ border-radius:8px;padding:.15rem .55rem;font-size:.78rem;margin:.15rem}
 .muted{color:var(--muted)}
 ul.notas{padding-left:1.2rem;font-size:.88rem;color:var(--muted)}
 ul.notas li{margin:.35rem 0}
+.tabla{overflow-x:auto}
+@media (max-width:640px){
+body{padding:.5rem}
+.card{padding:.8rem;margin-top:.7rem}
+header h1{font-size:1.15rem}
+table{font-size:.78rem}
+th,td{padding:.4rem .45rem;white-space:nowrap}
+}
+@media print{
+body{background:#fff;color:#111}
+.card{background:#fff;border:1px solid #999;page-break-inside:avoid}
+header h1,h2{color:#000}
+.muted,ul.notas,header .sub{color:#333}
+th{color:#333}
+.badge.ok{color:#0a6b2d;border:1px solid #0a6b2d}
+.badge.warn{color:#8a5a00;border:1px solid #8a5a00}
+.chip{background:#fff;border:1px solid #666}
+.tabla{overflow-x:visible}
+table{font-size:.78rem}
+th,td{white-space:normal;word-break:break-word}
+}
 """
 
     html = f"""<!DOCTYPE html>
@@ -146,6 +167,7 @@ ul.notas li{margin:.35rem 0}
 </header>
 <div class="card">
   <h2>Equipos recolectados</h2>
+  <div class="tabla">
   <table>
     <thead><tr>
       <th>Hostname</th><th>SO</th><th>Conexion</th><th>Wi-Fi SSID</th>
@@ -153,6 +175,7 @@ ul.notas li{margin:.35rem 0}
     </tr></thead>
     <tbody>{filas}</tbody>
   </table>
+  </div>
 </div>
 <div class="card">
   <h2>Agrupacion por red (inferida)</h2>
