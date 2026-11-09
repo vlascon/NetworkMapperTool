@@ -287,3 +287,125 @@ def test_informe_es_autocontenido_sin_cdn(informe):
 def test_informe_topologia_marcada_como_inferida(informe):
     assert "inferido" in informe.lower()
     assert "no representa la topología física real" in informe
+
+
+# ---------------------------------------------------------------- multiplataforma
+
+IP_ROUTE_LINUX = """default via 192.168.1.1 dev wlan0 proto dhcp src 192.168.1.50 metric 600
+192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.50 metric 600
+10.8.0.0/24 via 192.168.1.254 dev wlan0
+"""
+
+NETSTAT_MACOS = """Routing tables
+
+Internet:
+Destination        Gateway            Flags               Netif Expire
+default            192.168.1.1        UGScg                 en0
+127                127.0.0.1          UCS                   lo0
+192.168.1.0/24     link#8             UCS                   en0      !
+192.168.1.50       link#8             UHLWIi                en0   1187
+"""
+
+IP_NEIGH_LINUX = """192.168.1.1 dev wlan0 lladdr 1c:3b:f3:aa:bb:cc REACHABLE
+192.168.1.9 dev wlan0  FAILED
+192.168.1.20 dev wlan0 lladdr 00:80:48:11:22:33 STALE
+"""
+
+ARP_A_MACOS = """? (192.168.1.1) at 1c:3b:f3:aa:bb:cc on en0 ifscope [ethernet]
+? (192.168.1.9) at (incomplete) on en0 ifscope [ethernet]
+? (192.168.1.20) at 0:80:48:11:22:33 on en0 ifscope [ethernet]
+"""
+
+NMCLI_WIFI = """no:RedVecina:42
+yes:MiWifi:78
+"""
+
+
+def test_parse_ip_route_linux():
+    from src.network_discovery import _parse_ip_route
+    datos = _parse_ip_route(IP_ROUTE_LINUX)
+    assert datos["gateways"] == [{"gateway": "192.168.1.1", "interface": "wlan0"}]
+    rutas = {(r["destination"], r["netmask"]): r for r in datos["routes"]}
+    assert ("192.168.1.0", "255.255.255.0") in rutas
+    assert rutas[("10.8.0.0", "255.255.255.0")]["gateway"] == "192.168.1.254"
+    assert rutas[("192.168.1.0", "255.255.255.0")]["gateway"] == "On-link"
+
+
+def test_parse_netstat_macos():
+    from src.network_discovery import _parse_netstat_inet
+    datos = _parse_netstat_inet(NETSTAT_MACOS)
+    assert datos["gateways"] == [{"gateway": "192.168.1.1", "interface": "en0"}]
+    # Solo rutas CIDR + default; la ruta de host /32 se ignora
+    dests = {r["destination"] for r in datos["routes"]}
+    assert "192.168.1.0" in dests and "192.168.1.50" not in dests
+
+
+def test_parse_ip_neigh_linux():
+    from src.network_discovery import _parse_ip_neigh
+    devs = _parse_ip_neigh(IP_NEIGH_LINUX)
+    assert len(devs) == 2  # la entrada FAILED sin lladdr se omite
+    assert devs[0]["mac"] == "1c:3b:f3:aa:bb:cc"
+    assert devs[0]["vendor"] == "TP-Link"
+
+
+def test_parse_arp_a_macos():
+    from src.network_discovery import _parse_arp_a_unix
+    devs = _parse_arp_a_unix(ARP_A_MACOS)
+    ips = {d["ip"] for d in devs}
+    assert ips == {"192.168.1.1", "192.168.1.20"}  # incomplete se omite
+
+
+def test_parse_nmcli_wifi():
+    from src.network_discovery import _parse_nmcli_wifi
+    assert _parse_nmcli_wifi(NMCLI_WIFI) == {"ssid": "MiWifi", "signal": "78%"}
+
+
+def test_dispatch_linux_usa_ip_route(monkeypatch):
+    monkeypatch.setattr(network_discovery.platform, "system", lambda: "Linux")
+    llamados = []
+    def falso_run(args, timeout=3):
+        llamados.append(args)
+        return IP_ROUTE_LINUX if args[0] == "ip" else None
+    monkeypatch.setattr(network_discovery, "_run", falso_run)
+    datos = network_discovery.get_gateways_and_routes()
+    assert datos["gateways"][0]["gateway"] == "192.168.1.1"
+    assert ["ip", "route"] in llamados
+
+
+def test_dispatch_macos_arp(monkeypatch):
+    monkeypatch.setattr(network_discovery.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(network_discovery, "_run", lambda args, timeout=3: ARP_A_MACOS)
+    devs = network_discovery.get_arp_table()
+    assert {d["ip"] for d in devs} == {"192.168.1.1", "192.168.1.20"}
+
+
+def test_wan_opt_in_no_llama_internet(monkeypatch):
+    def prohibido(*a, **k):
+        raise AssertionError("sin --wan no debe hablarse con internet")
+    monkeypatch.setattr(network_discovery.requests, "get", prohibido)
+    monkeypatch.setattr(network_discovery.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(network_discovery, "_run", lambda args, timeout=3: IP_ROUTE_LINUX if args == ["ip", "route"] else (IP_NEIGH_LINUX if args == ["ip", "neigh"] else None))
+    monkeypatch.setattr(network_discovery, "get_nmap_path", lambda: None)
+    monkeypatch.setattr(network_discovery, "scan_subnet_concurrently", lambda *a, **k: [])
+    datos = network_discovery.full_network_discovery(include_public_ip=False)
+    assert datos["public_ip"] == "No consultada (usa --wan para incluirla)"
+    assert any("--wan" in n for n in datos["notes"])
+
+
+def test_notas_declaran_fuentes_ausentes(monkeypatch):
+    monkeypatch.setattr(network_discovery.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(network_discovery, "_run", lambda args, timeout=3: None)  # sin herramientas
+    monkeypatch.setattr(network_discovery, "get_nmap_path", lambda: None)
+    monkeypatch.setattr(network_discovery, "scan_subnet_concurrently", lambda *a, **k: [])
+    datos = network_discovery.full_network_discovery()
+    assert any("gateway" in n.lower() for n in datos["notes"])
+    assert any("vecinos" in n for n in datos["notes"])
+    assert any("SSID" in n for n in datos["notes"])
+
+
+def test_informe_muestra_notas_del_sistema(tmp_path):
+    net = dict(NET)
+    net["notes"] = ["Nota de prueba: fuente X no disponible en este SO."]
+    out = tmp_path / "i4.html"
+    generate_html_report(SPECS, net, output_path=str(out))
+    assert "Nota de prueba: fuente X no disponible en este SO." in out.read_text(encoding="utf-8")

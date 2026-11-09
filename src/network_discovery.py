@@ -1,4 +1,5 @@
 import os
+import platform
 import subprocess
 import re
 import socket
@@ -108,25 +109,191 @@ def get_public_ip():
         pass
     return "No disponible (Sin conexión WAN)"
 
-def get_wifi_ssid():
+
+# ---------------------------------------------------------------- multiplataforma
+# Cada consulta al SO tiene un parser puro (texto -> datos) para probarse con
+# fixtures, y un despachador por plataforma. Si una fuente no existe en el SO,
+# se degrada a vacío y full_network_discovery lo declara en "notes".
+
+def _run(args, timeout=3):
+    """Ejecuta un comando de solo lectura. Devuelve stdout o None si falta/falla."""
     try:
-        output = subprocess.check_output("netsh wlan show interfaces", shell=True, stderr=subprocess.DEVNULL, timeout=2).decode('utf-8', errors='ignore')
-        ssid = "Red Cableada / Sin Wi-Fi"
-        signal = "N/A"
-        for line in output.split('\n'):
-            if "SSID" in line and "BSSID" not in line:
-                parts = line.split(":")
-                if len(parts) > 1:
-                    ssid = parts[1].strip()
-            elif "Signal" in line or "Señal" in line:
-                parts = line.split(":")
-                if len(parts) > 1:
-                    signal = parts[1].strip()
-        return {"ssid": ssid, "signal": signal}
+        out = subprocess.check_output(args, stderr=subprocess.DEVNULL, timeout=timeout)
+        return out.decode("utf-8", errors="ignore")
     except Exception:
-        return {"ssid": "N/A (Red cableada o sin WLAN)", "signal": "N/A"}
+        return None
+
+
+def _prefix_to_netmask(prefix):
+    try:
+        return str(ipaddress.ip_network(f"0.0.0.0/{int(prefix)}").netmask)
+    except Exception:
+        return "255.255.255.255"
+
+
+def _parse_ip_route(text):
+    """Salida de `ip route` (Linux)."""
+    gateways, routes = [], []
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        if parts[0] == "default" and "via" in parts:
+            gw = parts[parts.index("via") + 1]
+            iface = parts[parts.index("dev") + 1] if "dev" in parts else "?"
+            routes.append({"destination": "0.0.0.0", "netmask": "0.0.0.0",
+                           "gateway": gw, "interface": iface})
+            if gw not in [g["gateway"] for g in gateways]:
+                gateways.append({"gateway": gw, "interface": iface})
+        elif re.match(r"^\d{1,3}(\.\d{1,3}){3}/\d{1,2}$", parts[0]):
+            dest, prefix = parts[0].split("/")
+            gw = parts[parts.index("via") + 1] if "via" in parts else "On-link"
+            iface = parts[parts.index("dev") + 1] if "dev" in parts else "?"
+            routes.append({"destination": dest, "netmask": _prefix_to_netmask(prefix),
+                           "gateway": gw, "interface": iface})
+    return {"gateways": gateways, "routes": routes}
+
+
+def _parse_netstat_inet(text):
+    """Salida de `netstat -rn -f inet` (macOS)."""
+    gateways, routes = [], []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        dest, gw, iface = parts[0], parts[1], parts[3]
+        if dest == "default" and re.match(r"^\d{1,3}(\.\d{1,3}){3}$", gw):
+            routes.append({"destination": "0.0.0.0", "netmask": "0.0.0.0",
+                           "gateway": gw, "interface": iface})
+            if gw not in [g["gateway"] for g in gateways]:
+                gateways.append({"gateway": gw, "interface": iface})
+        elif "/" in dest:
+            ip_part, prefix = dest.split("/")
+            if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip_part):
+                gw_ok = gw if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", gw) else "On-link"
+                routes.append({"destination": ip_part, "netmask": _prefix_to_netmask(prefix),
+                               "gateway": gw_ok, "interface": iface})
+    return {"gateways": gateways, "routes": routes}
+
+
+def _parse_ip_neigh(text):
+    """Salida de `ip neigh` (Linux): vecinos con MAC conocida."""
+    devices = []
+    for line in text.splitlines():
+        parts = line.split()
+        if "lladdr" not in parts or len(parts) < 5:
+            continue
+        ip = parts[0]
+        mac = parts[parts.index("lladdr") + 1]
+        iface = parts[parts.index("dev") + 1] if "dev" in parts else "?"
+        state = parts[-1] if parts else ""
+        if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
+            continue
+        if not re.match(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$", mac):
+            continue
+        devices.append({
+            "ip": ip, "mac": mac.lower(), "type": "dynamic",
+            "interface_ip": iface, "vendor": lookup_mac_vendor(mac),
+            "status": f"Online (ip neigh: {state})"
+        })
+    return devices
+
+
+def _parse_arp_a_unix(text):
+    """Salida de `arp -a` formato BSD/macOS: 'host (IP) at MAC on IFACE'.
+    macOS imprime las MAC sin relleno de ceros (0:80:48:...): se normalizan."""
+    devices = []
+    patron = re.compile(r"\((\d{1,3}(?:\.\d{1,3}){3})\) at ([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5}) on (\S+)")
+    for match in patron.finditer(text):
+        ip, mac, iface = match.groups()
+        mac = ":".join(p.zfill(2) for p in mac.split(":"))
+        devices.append({
+            "ip": ip, "mac": mac.lower(), "type": "dynamic",
+            "interface_ip": iface, "vendor": lookup_mac_vendor(mac),
+            "status": "Online (ARP)"
+        })
+    return devices
+
+
+def _parse_nmcli_wifi(text):
+    """Salida de `nmcli -t -f ACTIVE,SSID,SIGNAL dev wifi`: 'yes:MiRed:80'."""
+    for line in text.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 3 and parts[0].lower() in ("yes", "si", "sí"):
+            return {"ssid": parts[1] or "N/A", "signal": parts[2] + "%" if parts[2] else "N/A"}
+    return None
+
+
+def _parse_ssid_lines(text):
+    """Salidas tipo 'SSID: valor' (wdutil de macOS, airport -I)."""
+    ssid, signal = None, "N/A"
+    for line in text.splitlines():
+        limpia = line.strip()
+        if limpia.startswith("SSID:") and not limpia.startswith("BSSID:"):
+            ssid = limpia.split(":", 1)[1].strip()
+        elif "agrCtlRSSI:" in limpia:
+            signal = limpia.split(":", 1)[1].strip() + " dBm"
+    if ssid and ssid != "<redacted>":
+        return {"ssid": ssid, "signal": signal}
+    return None
+
+def get_wifi_ssid():
+    system = platform.system()
+    if system == "Windows":
+        try:
+            output = subprocess.check_output("netsh wlan show interfaces", shell=True, stderr=subprocess.DEVNULL, timeout=2).decode('utf-8', errors='ignore')
+            ssid = "Red Cableada / Sin Wi-Fi"
+            signal = "N/A"
+            for line in output.split('\n'):
+                if "SSID" in line and "BSSID" not in line:
+                    parts = line.split(":")
+                    if len(parts) > 1:
+                        ssid = parts[1].strip()
+                elif "Signal" in line or "Señal" in line:
+                    parts = line.split(":")
+                    if len(parts) > 1:
+                        signal = parts[1].strip()
+            return {"ssid": ssid, "signal": signal}
+        except Exception:
+            return {"ssid": "N/A (Red cableada o sin WLAN)", "signal": "N/A"}
+    if system == "Linux":
+        out = _run(["nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi"])
+        if out:
+            parsed = _parse_nmcli_wifi(out)
+            if parsed:
+                return parsed
+        out = _run(["iwgetid", "-r"])
+        if out and out.strip():
+            return {"ssid": out.strip(), "signal": "N/A"}
+        return {"ssid": "N/A (sin nmcli/iwgetid o sin WLAN en este Linux)", "signal": "N/A"}
+    if system == "Darwin":
+        out = _run(["wdutil", "info"], timeout=4)
+        if out:
+            parsed = _parse_ssid_lines(out)
+            if parsed:
+                return parsed
+        airport = "/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport"
+        out = _run([airport, "-I"])
+        if out:
+            parsed = _parse_ssid_lines(out)
+            if parsed:
+                return parsed
+        return {"ssid": "N/A (sin wdutil/airport o sin WLAN en este macOS)", "signal": "N/A"}
+    return {"ssid": f"N/A (sistema {system} no soportado)", "signal": "N/A"}
 
 def get_gateways_and_routes():
+    system = platform.system()
+    if system == "Linux":
+        out = _run(["ip", "route"])
+        if out is not None:
+            return _parse_ip_route(out)
+        return {"gateways": [], "routes": []}
+    if system == "Darwin":
+        out = _run(["netstat", "-rn", "-f", "inet"])
+        if out is not None:
+            return _parse_netstat_inet(out)
+        return {"gateways": [], "routes": []}
+    # Windows: `route print`
     gateways = []
     routes = []
     try:
@@ -153,6 +320,18 @@ def get_gateways_and_routes():
     return {"gateways": gateways, "routes": routes}
 
 def get_arp_table():
+    system = platform.system()
+    if system == "Linux":
+        out = _run(["ip", "neigh"])
+        if out is not None:
+            return _parse_ip_neigh(out)
+        return []
+    if system == "Darwin":
+        out = _run(["arp", "-a"])
+        if out is not None:
+            return _parse_arp_a_unix(out)
+        return []
+    # Windows: `arp -a` con encabezados 'Interface:'
     arp_devices = []
     try:
         output = subprocess.check_output("arp -a", shell=True, stderr=subprocess.DEVNULL, timeout=2).decode('utf-8', errors='ignore')
@@ -270,11 +449,31 @@ def run_nmap_scan(subnet_str):
         pass
     return discovered
 
-def full_network_discovery():
+def full_network_discovery(include_public_ip=False):
+    """Descubrimiento de red local.
+
+    include_public_ip: consultar la IP pública a un servicio externo.
+    Por defecto es False: la herramienta no habla con internet salvo que el
+    operador lo pida explícitamente (opción --wan).
+    """
     wifi_info = get_wifi_ssid()
-    public_ip = get_public_ip()
+    public_ip = get_public_ip() if include_public_ip else "No consultada (usa --wan para incluirla)"
     routes_data = get_gateways_and_routes()
     arp_devices = get_arp_table()
+
+    # Declarar qué fuentes no estaban disponibles en este SO: un informe
+    # degradado sin aviso es peor que un informe honesto.
+    notes = []
+    system = platform.system()
+    if system != "Windows":
+        if not routes_data["gateways"]:
+            notes.append(f"Sin gateway detectado en {system}: se intentó '{'ip route' if system == 'Linux' else 'netstat -rn'}'; puede no haber red o faltar la herramienta.")
+        if not arp_devices:
+            notes.append(f"Tabla de vecinos vacía en {system}: se intentó '{'ip neigh' if system == 'Linux' else 'arp -a'}'; el descubrimiento dependerá del barrido por puertos.")
+        if str(wifi_info.get("ssid", "")).startswith("N/A"):
+            notes.append(f"SSID Wi-Fi no obtenido en {system}: faltan las herramientas del SO (nmcli/iwgetid o wdutil/airport) o no hay WLAN.")
+    if not include_public_ip:
+        notes.append("IP pública no consultada: la herramienta no habla con internet salvo que se use --wan.")
 
     # Recopilar todas las subredes alcanzables (multi-segmento)
     subnets_to_scan = set()
@@ -354,7 +553,8 @@ def full_network_discovery():
         "routes": routes_data["routes"],
         "subnets_scanned": list(subnets_to_scan),
         "nmap_available": has_nmap,
-        "devices": all_devices
+        "devices": all_devices,
+        "notes": notes
     }
 
 if __name__ == "__main__":

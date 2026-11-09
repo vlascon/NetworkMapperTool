@@ -30,6 +30,8 @@ def parse_args(argv=None):
                         help="Omitir resolución de nombres DNS (más rápido, hostnames 'Desconocido')")
     parser.add_argument("--threads", type=int, default=64,
                         help="Hilos para el barrido de subred (por defecto: 64)")
+    parser.add_argument("--wan", action="store_true",
+                        help="Consultar la IP pública a un servicio externo (por defecto la herramienta no habla con internet)")
     return parser.parse_args(argv)
 
 
@@ -59,7 +61,7 @@ def main(argv=None):
 
         # Task 2: Network Discovery & Nmap
         task2 = progress.add_task("[yellow]Escaneando redes, rutas y segmentos (Multi-segmento / Nmap)...", total=None)
-        net_data = full_network_discovery()
+        net_data = full_network_discovery(include_public_ip=args.wan)
         progress.update(task2, completed=1, total=1, description="[green]✓ Escaneo de red y segmentos finalizado")
 
         # Task 3: Classification & HTML Report

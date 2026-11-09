@@ -139,6 +139,9 @@ def generate_html_report(system_specs, network_data, output_path="network_report
         observations.append("nmap no está instalado: el descubrimiento se hizo solo por tabla ARP y puertos 80/443, así que pueden faltar dispositivos que no respondan en esos puertos. Instalar nmap mejora la cobertura.")
     if not devices:
         observations.append("No se detectaron dispositivos con este método; eso no significa que la red esté vacía: revisa cobertura (nmap) y permisos.")
+    # Fuentes no disponibles en este SO (declaradas por network_discovery)
+    for note in network_data.get("notes", []):
+        observations.append(note)
     if not observations:
         observations.append("Sin observaciones: todos los dispositivos detectados tienen MAC y fabricante identificados.")
     observations_html = "\n".join(f"                <li>{esc(o)}</li>" for o in observations)
