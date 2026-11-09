@@ -50,7 +50,8 @@ def _fila_equipo(eq):
     conexion = eq.get("conexion") or {}
     wifi = conexion.get("wifi") or {}
     tipo = conexion.get("tipo")
-    if conexion.get("tipo_verificado") and tipo in ("wifi", "ethernet"):
+    if conexion.get("tipo_verificado") and tipo in ("wifi", "ethernet", "cable"):
+        # levantamiento.py emite "cable" para Ethernet; aceptar ambos nombres
         etiqueta = "Wi-Fi" if tipo == "wifi" else "Cable"
         conexion_html = f'{etiqueta} <span class="badge ok">verificado en ese PC</span>'
     else:

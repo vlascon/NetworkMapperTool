@@ -823,3 +823,20 @@ def test_data_dir_anclado_al_proyecto_no_al_cwd(monkeypatch, tmp_path):
     assert os.path.normpath(args.data_dir) == os.path.normpath(esperado)
     assert str(tmp_path) not in args.data_dir
     importlib.reload(main_mod)  # restaurar estado del módulo
+
+
+def test_consolidado_reconoce_tipo_cable_como_verificado(tmp_path):
+    # Regresión del hallazgo del peer: la colecta real emite tipo="cable"
+    # (no "ethernet"); un equipo cableado verificado no debe quedar
+    # "Desconocido/no verificado" en el informe consolidado.
+    lev = _lev_prueba()
+    eq = _equipo_prueba(equipo_id="eq-cable", hostname="PC-CABLEADO")
+    eq["conexion"] = {"interfaz_principal": "eth0", "tipo": "cable",
+                      "tipo_verificado": True, "wifi": {}, "gateway": "192.168.1.1"}
+    lv.merge_equipo(lev, eq, lambda c: None)
+    salida = generate_consolidated_report(lev, str(tmp_path / "informe.html"))
+    with open(salida, encoding="utf-8") as fh:
+        html = fh.read()
+    fila = html[html.index("PC-CABLEADO"):]
+    assert 'Cable <span class="badge ok">verificado en ese PC</span>' in fila
+    assert "no verificado" not in fila[:fila.index("</tr>")]
