@@ -1,4 +1,5 @@
 """Pruebas con fixtures locales: ninguna toca la red ni el hardware real."""
+import os
 import subprocess
 import sys
 import textwrap
@@ -409,3 +410,137 @@ def test_informe_muestra_notas_del_sistema(tmp_path):
     out = tmp_path / "i4.html"
     generate_html_report(SPECS, net, output_path=str(out))
     assert "Nota de prueba: fuente X no disponible en este SO." in out.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------- levantamiento
+
+from src import levantamiento as lv
+
+
+def _lev_prueba():
+    return lv.crear_levantamiento("Empresa Prueba", sede="Casa Matriz")
+
+
+def _equipo_prueba(equipo_id=None, hostname="PC-1", mac="1c:3b:f3:aa:bb:cc"):
+    return {
+        "equipo_id": equipo_id,
+        "hostname": hostname,
+        "so": "Linux de prueba",
+        "recolectado_en": "2026-11-09T10:00:00-03:00",
+        "hardware": {"hostname": hostname},
+        "conexion": {"tipo": "wifi", "tipo_verificado": True, "gateway": "192.168.1.1"},
+        "interfaces": [{"nombre": "wlan0", "ip": "192.168.1.50", "mac": mac, "activa": True}],
+        "vecinos": [],
+        "notas": [],
+    }
+
+
+def test_crear_levantamiento_campos():
+    lev = _lev_prueba()
+    assert lev["estado"] == "abierto"
+    assert lev["empresa"] == "Empresa Prueba"
+    assert lev["levantamiento_id"].startswith("lev-")
+    assert lev["equipos"] == []
+
+
+def test_guardar_y_listar_roundtrip(tmp_path):
+    lev = _lev_prueba()
+    destino = lv.guardar_levantamiento(lev, str(tmp_path))
+    assert os.path.exists(destino)
+    assert not os.path.exists(destino + ".tmp")
+    empresas = lv.listar_empresas(str(tmp_path))
+    assert empresas == ["Empresa_Prueba"]
+    levs = lv.listar_levantamientos(str(tmp_path), "Empresa Prueba")
+    assert len(levs) == 1 and levs[0]["levantamiento_id"] == lev["levantamiento_id"]
+
+
+def test_merge_equipo_nuevo_y_mismo_id():
+    lev = _lev_prueba()
+    eq = _equipo_prueba()
+    assert lv.merge_equipo(lev, eq, lambda c: None) == "nuevo"
+    asignado = lev["equipos"][0]["equipo_id"]
+    eq2 = _equipo_prueba(equipo_id=asignado, hostname="PC-1-RENOMBRADO")
+    assert lv.merge_equipo(lev, eq2, lambda c: None) == "actualizado"
+    assert len(lev["equipos"]) == 1
+    assert lev["equipos"][0]["hostname"] == "PC-1-RENOMBRADO"
+
+
+def test_merge_candidato_requiere_confirmacion():
+    lev = _lev_prueba()
+    lv.merge_equipo(lev, _equipo_prueba(equipo_id="eq-original"), lambda c: None)
+    # Mismo MAC, sin equipo_id: hay candidato; el operador confirma que es el mismo
+    eq = _equipo_prueba(equipo_id=None, hostname="OTRO-NOMBRE")
+    vio_candidatos = []
+    def confirmar(candidatos):
+        vio_candidatos.extend(candidatos)
+        return "eq-original"
+    assert lv.merge_equipo(lev, eq, confirmar) == "actualizado"
+    assert len(lev["equipos"]) == 1
+    assert "MAC coincidente" in vio_candidatos[0]["motivos"]
+
+
+def test_merge_candidato_rechazado_crea_nuevo():
+    lev = _lev_prueba()
+    lv.merge_equipo(lev, _equipo_prueba(equipo_id="eq-original"), lambda c: None)
+    eq = _equipo_prueba(equipo_id=None, hostname="OTRO-NOMBRE")
+    assert lv.merge_equipo(lev, eq, lambda c: None) == "nuevo"
+    assert len(lev["equipos"]) == 2
+
+
+def test_finalizar_levantamiento():
+    lev = _lev_prueba()
+    lv.finalizar_levantamiento(lev)
+    assert lev["estado"] == "finalizado"
+
+
+def test_validar_archivo_valido(tmp_path):
+    lev = _lev_prueba()
+    lv.merge_equipo(lev, _equipo_prueba(equipo_id="eq-1"), lambda c: None)
+    destino = lv.guardar_levantamiento(lev, str(tmp_path))
+    ok, errores = lv.validar_levantamiento_bytes(open(destino, "rb").read())
+    assert errores == [] and ok["empresa"] == "Empresa Prueba"
+
+
+def test_validar_rechaza_json_roto():
+    ok, errores = lv.validar_levantamiento_bytes(b"{no es json")
+    assert ok is None and errores
+
+
+def test_validar_rechaza_gigante():
+    ok, errores = lv.validar_levantamiento_bytes(b" " * (5 * 1024 * 1024 + 1))
+    assert ok is None and "excede" in errores[0]
+
+
+def test_validar_rechaza_campos_malos():
+    import json as _json
+    malo = _json.dumps({"schema_version": 99, "estado": "raro", "equipos": {}}).encode()
+    ok, errores = lv.validar_levantamiento_bytes(malo)
+    assert ok is None and len(errores) >= 3
+
+
+def test_exportar_equipo():
+    lev = _lev_prueba()
+    lv.merge_equipo(lev, _equipo_prueba(equipo_id="eq-1"), lambda c: None)
+    paquete = lv.exportar_equipo(lev, "eq-1")
+    assert paquete["tipo"] == "equipo"
+    assert paquete["equipo"]["equipo_id"] == "eq-1"
+    assert lv.exportar_equipo(lev, "eq-inexistente") is None
+
+
+def test_recolectar_equipo_wifi_linux(monkeypatch):
+    import psutil as _psutil
+    from src import hardware as hw
+    monkeypatch.setattr(hw, "get_system_specs", lambda: {"hostname": "PC-TEST", "os": "Linux X"})
+    monkeypatch.setattr(lv.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(network_discovery, "get_wifi_ssid", lambda: {"ssid": "MiWifi", "signal": "80%"})
+    monkeypatch.setattr(network_discovery, "get_gateways_and_routes",
+                        lambda: {"gateways": [{"gateway": "192.168.1.1", "interface": "wlan0"}], "routes": []})
+    monkeypatch.setattr(network_discovery, "get_arp_table", lambda: [])
+    monkeypatch.setattr(_psutil, "net_if_addrs", lambda: {"wlan0": []})
+    monkeypatch.setattr(_psutil, "net_if_stats", lambda: {"wlan0": type("S", (), {"isup": True})()})
+    monkeypatch.setattr(os.path, "isdir", lambda p: p == "/sys/class/net/wlan0/wireless")
+    eq = lv.recolectar_equipo()
+    assert eq["conexion"]["tipo"] == "wifi"
+    assert eq["conexion"]["tipo_verificado"] is True
+    assert eq["conexion"]["gateway"] == "192.168.1.1"
+    assert eq["hostname"] == "PC-TEST"
