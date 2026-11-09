@@ -51,6 +51,14 @@ ul.obs { margin-left: 18px; } ul.obs li { font-size: 13px; color: #cbd5e1; margi
 .bar-row:nth-child(4n+3) .bar-fill { background: #f59e0b; }
 .bar-row:nth-child(4n+4) .bar-fill { background: #a855f7; }
 .bar-count { text-align: right; color: #cbd5e1; font-family: Consolas, monospace; }
+/* Iconos SVG en línea (sin fuentes emoji externas) */
+.ic { width: 18px; height: 18px; vertical-align: -3px; color: #7dd3fc; margin-right: 6px; }
+h1 .ic { width: 26px; height: 26px; vertical-align: -5px; }
+/* Móvil: nombre en su propia fila y barra a ancho completo */
+@media (max-width: 560px) {
+  .bar-row { grid-template-columns: 1fr 48px; gap: 6px 10px; }
+  .bar-row > span:first-child { grid-column: 1 / -1; }
+}
 /* Hardware */
 .spec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .spec { background: #0b1226; border: 1px solid #1e293b; border-radius: 12px; padding: 12px 14px; }
@@ -219,7 +227,7 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     <header class="card">
         <div class="header-top">
             <div>
-                <h1>🌐 NetworkMapperTool NOC <span class="badge">v1.2.0</span></h1>
+                <h1><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.9 5.7 3.9 9s-1.4 6.4-3.9 9c-2.5-2.6-3.9-5.7-3.9-9S9.5 5.6 12 3z"/></svg> NetworkMapperTool NOC <span class="badge">v1.2.0</span></h1>
                 <p class="sub" style="margin-top:6px">Informe de descubrimiento de red e inventario de hardware · {scan_time}{duration_txt}</p>
             </div>
             <div class="badges">
@@ -238,14 +246,14 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     </section>
 
     <section class="card" style="margin-top:20px">
-        <h2>📋 Observaciones</h2>
+        <h2><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg> Observaciones</h2>
         <ul class="obs">
 {observations_html}
         </ul>
     </section>
 
     <section class="card">
-        <h2>🗺️ Mapa de la red (inferido)</h2>
+        <h2><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M10.8 6.8 6.3 16.1M13.2 6.8l4.5 9.3M7.3 18h9.4"/></svg> Mapa de la red (inferido)</h2>
         <p class="sub">Mapa inferido a partir del gateway y los dispositivos detectados: no representa la topología física real (switches, cableado, VLANs).</p>
         <div class="topo">
             <div class="node wan"><div class="t">Internet / WAN</div><div class="n mono">{esc(public_ip)}</div></div>
@@ -259,13 +267,13 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     </section>
 
     <section class="card">
-        <h2>📊 Clasificación de dispositivos</h2>
+        <h2><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20v-7M10 20V4M16 20v-10"/><path d="M2 20h20"/></svg> Clasificación de dispositivos</h2>
         <p class="sub">Cantidad de dispositivos detectados por tipo.</p>
 {bars_html if bars_html else '        <p class="sub">Sin datos.</p>'}
     </section>
 
     <section class="card">
-        <h2>🖥️ Inventario de hardware local</h2>
+        <h2><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg> Inventario de hardware local</h2>
         <p class="sub">{esc(os_info)}</p>
         <div class="spec-grid">
             <div class="spec">
@@ -283,12 +291,12 @@ def generate_html_report(system_specs, network_data, output_path="network_report
     </section>
 
     <section class="card">
-        <h2>🛰️ Subredes analizadas</h2>
+        <h2><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M6 6a9 9 0 0 0 0 12M18 6a9 9 0 0 1 0 12"/></svg> Subredes analizadas</h2>
         <div>{subnets_html if subnets_html else '<span class="sub">Ninguna detectada.</span>'}</div>
     </section>
 
     <section class="card">
-        <h2>🖧 Inventario de dispositivos detectados</h2>
+        <h2><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg> Inventario de dispositivos detectados</h2>
         <p class="sub">Los que respondieron al descubrimiento; pueden faltar dispositivos (ver Observaciones).</p>
         <div class="toolbar">
             <input type="text" id="searchInput" placeholder="Buscar por nombre, IP, MAC o fabricante...">

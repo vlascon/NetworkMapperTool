@@ -1,5 +1,6 @@
-import concurrent.futures
+import queue
 import socket
+import threading
 
 
 def resolve_hostname(ip):
@@ -18,8 +19,6 @@ def resolve_hostnames_parallel(ips, max_workers=32, timeout=8.0):
     paralelo y sin duplicados evita multiplicar esa espera por dispositivo.
     El conjunto completo tiene una espera máxima (`timeout`): las consultas
     que no respondan a tiempo quedan como "Desconocido" y el escaneo sigue.
-    (Un hilo ya bloqueado en el resolver no se puede matar, pero no detiene
-    al resto: terminará solo cuando el resolver del sistema responda.)
     """
     unique_ips = []
     seen = set()
@@ -31,18 +30,41 @@ def resolve_hostnames_parallel(ips, max_workers=32, timeout=8.0):
     if not unique_ips:
         return {}
 
-    hostnames = {}
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
-    try:
-        futures = {executor.submit(resolve_hostname, ip): ip for ip in unique_ips}
-        done, not_done = concurrent.futures.wait(futures, timeout=timeout)
-        for future in done:
-            hostnames[futures[future]] = future.result()
-        for future in not_done:
-            future.cancel()
-            hostnames[futures[future]] = "Desconocido"
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+    work = queue.Queue()
+    for ip in unique_ips:
+        work.put(ip)
+    results = {}
+    lock = threading.Lock()
+    stop = threading.Event()
+    done = threading.Event()
+    remaining = len(unique_ips)
+
+    def worker():
+        nonlocal remaining
+        while not stop.is_set():
+            try:
+                ip = work.get_nowait()
+            except queue.Empty:
+                return
+            host = resolve_hostname(ip)
+            with lock:
+                results[ip] = host
+                remaining -= 1
+                if remaining == 0:
+                    done.set()
+
+    # Hilos daemon a propósito: si el resolver del sistema se bloquea más
+    # allá de `timeout`, el hilo queda abandonado pero NO impide que el
+    # proceso termine. Un ThreadPoolExecutor no sirve aquí: su atexit
+    # espera a todos sus hilos y colgaría la salida del programa.
+    for _ in range(min(max_workers, len(unique_ips))):
+        threading.Thread(target=worker, daemon=True).start()
+    done.wait(timeout)
+    stop.set()
+    with lock:
+        hostnames = dict(results)
+    for ip in unique_ips:
+        hostnames.setdefault(ip, "Desconocido")
     return hostnames
 
 

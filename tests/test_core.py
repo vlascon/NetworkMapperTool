@@ -1,7 +1,13 @@
 """Pruebas con fixtures locales: ninguna toca la red ni el hardware real."""
+import subprocess
+import sys
+import textwrap
 import time
+from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 from src import classifier, network_discovery
 from src.classifier import classify_device, enhance_device_list, resolve_hostnames_parallel
@@ -120,6 +126,39 @@ def test_resolver_tiene_espera_maxima(monkeypatch):
     duracion = time.time() - inicio
     assert duracion < 3.0, f"la espera no estuvo acotada: {duracion:.2f}s"
     assert resultado == {"10.0.0.1": "Desconocido", "10.0.0.2": "Desconocido"}
+
+
+def test_resolver_bloqueado_no_cuelga_el_proceso():
+    """Proceso completo: un resolver colgado para siempre no puede impedir
+    que el programa termine (no basta con que la función retorne)."""
+    script = textwrap.dedent(
+        """
+        import socket, sys, time
+        from src import classifier
+
+        def cuelgue_eterno(ip):
+            time.sleep(120)
+            return ("nunca", [], [ip])
+
+        socket.gethostbyaddr = cuelgue_eterno
+        t0 = time.monotonic()
+        res = classifier.resolve_hostnames_parallel(
+            ["10.9.9.1", "10.9.9.2"], max_workers=4, timeout=1.0)
+        el = time.monotonic() - t0
+        assert el < 5, f"la funcion no retorno a tiempo: {el:.2f}s"
+        assert res == {"10.9.9.1": "Desconocido", "10.9.9.2": "Desconocido"}, res
+        print("FUNCOk", round(el, 2))
+        """
+    )
+    # timeout=25: si el proceso se cuelga por hilos del resolver, falla aquí.
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, timeout=25, cwd=str(REPO_ROOT),
+    )
+    assert proc.returncode == 0, (
+        f"el proceso no termino limpio: rc={proc.returncode} stderr={proc.stderr}"
+    )
+    assert "FUNCOk" in proc.stdout
 
 
 # ---------------------------------------------------------------- barrido TCP
