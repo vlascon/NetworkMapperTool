@@ -752,3 +752,59 @@ def test_import_valida_archivo_cifrado():
         assert ok is None and errores
     finally:
         _sh.rmtree("datos-test-import", ignore_errors=True)
+
+
+def _contenedor_hostil(n, r, p):
+    import struct as _st
+    return _st.Struct(">8s16sIII12s").pack(
+        cif.MAGIC, b"\x00" * 16, n, r, p, b"\x00" * 12) + b"\x00" * 32
+
+
+def test_archivo_hostil_n_enorme_rechazado_antes_del_kdf():
+    import time
+    inicio = time.monotonic()
+    with pytest.raises(cif.ErrorCifrado, match="fuera del rango"):
+        cif.descifrar_bytes(_contenedor_hostil(4294967295, 8, 1), "clave")
+    assert time.monotonic() - inicio < 1  # sin derivación: rechazo inmediato
+
+
+def test_archivo_hostil_parametros_fuera_de_rango():
+    with pytest.raises(cif.ErrorCifrado):
+        cif.descifrar_bytes(_contenedor_hostil(2 ** 15, 999, 1), "clave")
+    with pytest.raises(cif.ErrorCifrado):
+        cif.descifrar_bytes(_contenedor_hostil(2 ** 15, 8, 999), "clave")
+    with pytest.raises(cif.ErrorCifrado):
+        cif.descifrar_bytes(_contenedor_hostil(2 ** 15 + 1, 8, 1), "clave")  # n no potencia de 2
+
+
+def test_archivo_hostil_presupuesto_memoria():
+    # n y r dentro de rango individual pero combinados exceden 64 MiB
+    with pytest.raises(cif.ErrorCifrado, match="memoria"):
+        cif.descifrar_bytes(_contenedor_hostil(2 ** 17, 16, 4), "clave")
+
+
+def test_parametros_propios_dentro_del_presupuesto():
+    # regresión: lo que escribe la herramienta siempre se puede leer
+    contenedor = cif.cifrar_bytes(b"datos", "clave")
+    assert cif.descifrar_bytes(contenedor, "clave") == b"datos"
+
+
+def test_descifrado_contenido_no_utf8_error_controlado(tmp_path):
+    # un contenedor válido con bytes no-JSON dentro: el lector lo declara, no explota
+    contenedor = cif.cifrar_bytes(b"\xff\xfe\x00 not json", "clave")
+    lev, motivo = lv._leer_levantamiento_bytes(contenedor, "clave")
+    assert lev is None and "JSON" in motivo
+
+
+def test_guardar_no_deja_temporal(tmp_path):
+    lev = _lev_prueba()
+    destino = lv.guardar_levantamiento(lev, str(tmp_path), contrasena="k")
+    assert not os.path.exists(destino + ".tmp")
+    lv.merge_equipo(lev, _equipo_prueba(), lambda c: None)
+    lv.guardar_levantamiento(lev, str(tmp_path), contrasena="k")
+    assert not os.path.exists(destino + ".tmp")
+
+
+def test_import_rechaza_contenedor_hostil_sin_kdf():
+    ok, errores = lv.validar_levantamiento_bytes(_contenedor_hostil(4294967295, 8, 1), contrasena="x")
+    assert ok is None and errores and "rango" in errores[0]

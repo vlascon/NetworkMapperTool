@@ -39,9 +39,32 @@ _LEN = 32  # clave AES-256
 
 _HEADER = struct.Struct(">8s16sIII12s")
 
+# Presupuesto acotado para parámetros LEÍDOS de un archivo (importar o
+# abrir): sin este tope, un archivo hostil podría declarar un n enorme y
+# agotar memoria/CPU al derivar la clave. Memoria scrypt ~ 128*n*r*p.
+# Nuestro default usa 128*2^15*8*1 = 32 MiB; admitimos hasta el doble
+# (64 MiB) para futuras subidas modestas, y rangos cerrados alrededor del
+# default: cualquier archivo que escriba esta herramienta queda dentro.
+_N_MIN, _N_MAX = 2 ** 10, 2 ** 17
+_R_MIN, _R_MAX = 1, 16
+_P_MIN, _P_MAX = 1, 4
+_MEMORIA_MAX = 64 * 1024 * 1024  # 64 MiB
+
 
 class ErrorCifrado(Exception):
     """Contraseña incorrecta, contenedor alterado o formato inválido."""
+
+
+def _validar_parametros(n, r, p):
+    """Rechaza parámetros fuera del presupuesto ANTES de derivar la clave."""
+    if not (_N_MIN <= n <= _N_MAX) or (n & (n - 1)) != 0:
+        raise ErrorCifrado(f"parámetro scrypt n={n} fuera del rango admitido")
+    if not (_R_MIN <= r <= _R_MAX):
+        raise ErrorCifrado(f"parámetro scrypt r={r} fuera del rango admitido")
+    if not (_P_MIN <= p <= _P_MAX):
+        raise ErrorCifrado(f"parámetro scrypt p={p} fuera del rango admitido")
+    if 128 * n * r * p > _MEMORIA_MAX:
+        raise ErrorCifrado("parámetros scrypt exceden el presupuesto de memoria admitido")
 
 
 def esta_cifrado(data):
@@ -74,6 +97,7 @@ def descifrar_bytes(contenedor, contrasena):
     if len(contenedor) < _HEADER.size + 16:  # header + tag mínimo de GCM
         raise ErrorCifrado("archivo cifrado truncado")
     magic, sal, n, r, p, nonce = _HEADER.unpack(contenedor[: _HEADER.size])
+    _validar_parametros(n, r, p)
     try:
         clave = _derivar(contrasena, sal, n, r, p)
         return AESGCM(clave).decrypt(nonce, contenedor[_HEADER.size :], MAGIC)
